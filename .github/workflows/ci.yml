@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install package metadata
+        run: npm ci --ignore-scripts
+
+      - name: Regenerate test PKI
+        run: npm run fixtures
+
+      - name: Syntax and unit tests
+        run: npm run check
+
+      - name: Static security assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -nE 'https?://' public; then
+            echo 'Unexpected remote runtime URL found in application assets.' >&2
+            exit 1
+          fi
+          grep -q "connect-src 'none'" public/index.html

@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <title>Certificate Tool</title>
+  <meta name="description" content="Local, browser-only X.509 certificate chain validation and PKI troubleshooting.">
+  <link rel="stylesheet" href="./assets/css/app.css">
+  <script type="module" src="./assets/js/app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="#certificate" aria-label="Certificate Tool home">
+        <span class="brand-mark" aria-hidden="true">🔐</span>
+        <span>
+          <strong>Certificate Tool</strong>
+          <small>X.509 chain analysis &amp; PKI troubleshooting</small>
+        </span>
+      </a>
+      <nav class="primary-nav" aria-label="Primary navigation">
+        <a href="#certificate" data-route-link="certificate">Certificate</a>
+        <a href="#privatekey" data-route-link="privatekey">Private Key</a>
+        <a href="#commands" data-route-link="commands">Commands</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell app-shell">
+    <section class="route" data-route="certificate">
+      <div class="page-heading">
+        <div>
+          <p class="eyebrow">Certificate analyser</p>
+          <h1>Validate an X.509 trust chain</h1>
+          <p>Supply a Root CA, any number of Intermediate CAs, and the server certificate. Validation runs locally in your browser.</p>
+        </div>
+        <div class="privacy-badge" title="Certificate data stays in this browser tab">
+          <span aria-hidden="true">🛡️</span>
+          <span><strong>Local only</strong><small>No uploads or telemetry</small></span>
+        </div>
+      </div>
+
+      <div class="notice info">
+        <strong>Trust model:</strong> this tool can validate a path against the Root CA you supply. It cannot inspect the operating-system or browser trust store from a normal GitHub Pages application.
+      </div>
+
+      <form id="certificate-form" novalidate>
+        <section class="input-stack" aria-labelledby="chain-input-heading">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow">Guided chain</p>
+              <h2 id="chain-input-heading">Certificates</h2>
+            </div>
+            <span class="order-hint">Trust-path order: Root → Intermediate(s) → Server</span>
+          </div>
+
+          <article class="cert-input-card" data-kind="root">
+            <div class="cert-input-heading">
+              <div>
+                <span class="step-badge">1</span>
+                <h3>Root CA</h3>
+                <span class="field-tag required">Required</span>
+              </div>
+              <button class="text-button" type="button" data-file-trigger="root-input">Choose file</button>
+            </div>
+            <p class="field-help">Paste the PEM trust anchor. Multiple Root CA certificates are accepted for alternative-path testing.</p>
+            <textarea id="root-input" name="root" spellcheck="false" autocomplete="off" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+            <input class="visually-hidden" type="file" data-file-input="root-input" accept=".pem,.crt,.cer,application/x-pem-file,application/pkix-cert">
+          </article>
+
+          <div id="intermediate-list" class="intermediate-list" aria-live="polite"></div>
+
+          <div class="intermediate-actions">
+            <button id="add-intermediate" class="secondary-button" type="button">＋ Add Intermediate CA</button>
+            <span>No fixed chain depth is assumed. One intermediate is shown by default because it is the common case.</span>
+          </div>
+
+          <article class="cert-input-card" data-kind="server">
+            <div class="cert-input-heading">
+              <div>
+                <span class="step-badge">3</span>
+                <h3>Server Certificate</h3>
+                <span class="field-tag required">Required</span>
+              </div>
+              <button class="text-button" type="button" data-file-trigger="server-input">Choose file</button>
+            </div>
+            <p class="field-help">The end-entity/leaf certificate presented by your TLS service.</p>
+            <textarea id="server-input" name="server" spellcheck="false" autocomplete="off" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+            <input class="visually-hidden" type="file" data-file-input="server-input" accept=".pem,.crt,.cer,application/x-pem-file,application/pkix-cert">
+          </article>
+        </section>
+
+        <section class="options-grid">
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Identity check</p>
+                <h2>Hostname / SAN</h2>
+              </div>
+            </div>
+            <label for="hostname-input">Hostname or IP address <span class="muted">(optional)</span></label>
+            <input id="hostname-input" class="text-input" name="hostname" type="text" placeholder="server01.example.com" autocapitalize="none" autocomplete="off" spellcheck="false">
+            <p class="field-help">Checks DNS/IP Subject Alternative Names. Common Name fallback is reported only as legacy behaviour.</p>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Deployment check</p>
+                <h2>Existing server bundle</h2>
+              </div>
+            </div>
+            <details>
+              <summary>Paste an existing <code>fullchain.pem</code> to check its order</summary>
+              <label for="bundle-input" class="visually-hidden">Existing fullchain.pem</label>
+              <textarea id="bundle-input" class="small-textarea" name="bundle" spellcheck="false" autocomplete="off" placeholder="Leaf first, then intermediate CA certificates..."></textarea>
+              <p class="field-help">The normal TLS bundle should contain the leaf first, followed by intermediates. The Root CA is normally omitted.</p>
+            </details>
+          </article>
+        </section>
+
+        <div id="form-error" class="notice error hidden" role="alert"></div>
+
+        <div class="form-actions">
+          <button id="analyse-button" class="primary-button" type="submit">Analyse certificates</button>
+          <button id="clear-button" class="secondary-button" type="button">Clear</button>
+        </div>
+      </form>
+
+      <section id="results" class="results hidden" aria-live="polite">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Analysis</p>
+            <h2>Validation results</h2>
+          </div>
+          <span id="overall-badge" class="status-pill"></span>
+        </div>
+
+        <div id="status-grid" class="status-grid"></div>
+
+        <section class="panel chain-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Discovered path</p>
+              <h2>Certificate chain</h2>
+            </div>
+            <span id="path-count" class="muted"></span>
+          </div>
+          <div id="chain-visual" class="chain-visual"></div>
+        </section>
+
+        <div class="results-columns">
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Time sanity</p>
+                <h2>Validity &amp; lifetime</h2>
+              </div>
+            </div>
+            <div id="time-results" class="check-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">RFC checks</p>
+                <h2>X.509 constraints</h2>
+              </div>
+            </div>
+            <div id="constraint-results" class="check-list"></div>
+          </section>
+        </div>
+
+        <section id="diagnosis-panel" class="panel hidden">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Chain diagnosis</p>
+              <h2>Missing or mismatched issuer</h2>
+            </div>
+          </div>
+          <div id="diagnosis-results" class="check-list"></div>
+        </section>
+
+        <section id="fullchain-panel" class="panel hidden">
+          <div class="panel-heading split-heading">
+            <div>
+              <p class="eyebrow">Corrected output</p>
+              <h2>fullchain.pem</h2>
+              <p>Leaf certificate first, followed by intermediate CA certificates. The Root CA is intentionally omitted.</p>
+            </div>
+            <div class="button-row">
+              <button id="copy-fullchain" class="secondary-button" type="button">Copy</button>
+              <button id="download-fullchain" class="secondary-button" type="button">Download</button>
+            </div>
+          </div>
+          <pre id="fullchain-output" class="code-output"></pre>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading split-heading">
+            <div>
+              <p class="eyebrow">Portable evidence</p>
+              <h2>Diagnostic report</h2>
+              <p>Suitable for tickets, change records, notes and incident troubleshooting.</p>
+            </div>
+            <button id="copy-report" class="secondary-button" type="button">Copy report</button>
+          </div>
+          <pre id="report-output" class="code-output report-output"></pre>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Certificate inventory</p>
+              <h2>Certificate details</h2>
+            </div>
+          </div>
+          <div id="certificate-details" class="certificate-details"></div>
+        </section>
+      </section>
+    </section>
+
+    <section class="route hidden" data-route="privatekey">
+      <div class="page-heading">
+        <div>
+          <p class="eyebrow">Roadmap</p>
+          <h1>Certificate ↔ private-key validation</h1>
+          <p>This surface is reserved for the next implementation phase. The security boundary is defined now so private-key handling cannot accidentally become persistent later.</p>
+        </div>
+      </div>
+      <div class="results-columns">
+        <section class="panel">
+          <h2>Planned checks</h2>
+          <ul class="feature-list">
+            <li>Derive the public key from a supplied private key and compare it with the certificate SPKI.</li>
+            <li>RSA, ECDSA and modern key formats where browser Web Crypto support permits.</li>
+            <li>Certificate/key algorithm and key-size information.</li>
+            <li>Explicit match / mismatch result without transmitting key material.</li>
+          </ul>
+        </section>
+        <section class="panel security-panel">
+          <h2>Private-key handling policy</h2>
+          <ul class="feature-list">
+            <li>Never uploaded or sent over the network.</li>
+            <li>Never written to localStorage, sessionStorage, IndexedDB or cookies.</li>
+            <li>Never included in diagnostic reports, logs or telemetry.</li>
+            <li>Held only in memory for the operation and cleared from application references afterwards.</li>
+            <li>No third-party analytics or CDN JavaScript.</li>
+          </ul>
+        </section>
+      </div>
+    </section>
+
+    <section class="route hidden" data-route="commands">
+      <div class="page-heading">
+        <div>
+          <p class="eyebrow">Reference</p>
+          <h1>Certificate trust &amp; troubleshooting commands</h1>
+          <p>Reference commands for installing/removing Root CA trust and inspecting TLS material. Review commands before running them on production systems.</p>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="panel-heading split-heading">
+          <div>
+            <p class="eyebrow">Operating system</p>
+            <h2>Root CA trust store</h2>
+          </div>
+          <label class="select-label" for="platform-select">Platform
+            <select id="platform-select"></select>
+          </label>
+        </div>
+        <div id="platform-commands" class="command-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">OpenSSL</p>
+            <h2>Troubleshooting helpers</h2>
+          </div>
+        </div>
+        <div id="openssl-commands" class="command-list"></div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <span>Certificate Tool</span>
+      <span>Browser-only · no backend · no telemetry</span>
+    </div>
+  </footer>
+</body>
+</html>
