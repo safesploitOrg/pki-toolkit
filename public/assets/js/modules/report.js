@@ -29,6 +29,12 @@ export function buildDiagnosticReport({ result, leaf, hostnameResult }) {
 
     lines.push(`Guided field order: ${result.order.correct ? 'PASS' : 'WARN'} - ${result.order.message}`);
     lines.push(`Existing server bundle: ${statusLabel(result.bundle.status)} - ${result.bundle.message}`);
+    if (result.bundle.actual?.length) {
+      lines.push('  Supplied order:');
+      result.bundle.actual.forEach((cert, index) => lines.push(`    ${index + 1}. ${getCertificateDisplayName(cert)}`));
+      lines.push('  Expected TLS order:');
+      result.bundle.expected.forEach((cert, index) => lines.push(`    ${index + 1}. ${getCertificateDisplayName(cert)}`));
+    }
     lines.push('');
 
     lines.push('Time sanity:');
@@ -67,6 +73,14 @@ export function buildDiagnosticReport({ result, leaf, hostnameResult }) {
   const sans = leaf.extensions.subjectAltName || [];
   if (sans.length) lines.push(`  SAN: ${sans.map((san) => `${san.type}:${san.value}`).join(', ')}`);
   lines.push('');
-  lines.push('Important: this report validates against the Root CA supplied to the page. It does not assert that the local operating system or browser trusts that Root CA.');
+  if (result.selectedPath) {
+    const anchor = result.selectedPath[result.selectedPath.length - 1];
+    lines.push('Trust context:');
+    lines.push(`  Supplied trust anchor: ${getCertificateDisplayName(anchor)}`);
+    lines.push(`  Root SHA-256: ${anchor.fingerprints?.sha256 || 'n/a'}`);
+    lines.push('  OS/browser trust: NOT INSPECTED');
+    lines.push('');
+  }
+  lines.push('Important: this report validates against the Root CA supplied to the page. It does not assert that the local operating system, browser, JVM, container image or application trust store trusts that Root CA.');
   return lines.join('\n');
 }

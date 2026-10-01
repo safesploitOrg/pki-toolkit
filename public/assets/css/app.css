@@ -243,3 +243,30 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   .form-actions button, .button-row button { flex: 1; }
   .footer-inner { align-items: flex-start; flex-direction: column; justify-content: center; padding: 14px 0; }
 }
+
+/* Validation detail panels */
+.link-button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.trust-context-panel { margin-top: 16px; }
+.trust-context-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.trust-context-item { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); padding: 13px; }
+.trust-context-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.trust-context-item p { margin: 8px 0 6px; font-size: 0.84rem; }
+.trust-context-item small { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.bundle-summary { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.bundle-summary p { margin: 0; color: var(--muted); font-size: 0.84rem; }
+.bundle-order-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 14px; }
+.bundle-order-grid > div { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); padding: 13px; }
+.bundle-order-grid h3 { margin: 0 0 10px; font-size: 0.9rem; }
+.bundle-order-list { margin: 0; padding-left: 24px; }
+.bundle-order-list li + li { margin-top: 9px; }
+.bundle-order-list strong, .bundle-order-list small { display: block; overflow-wrap: anywhere; }
+.bundle-order-list strong { font-size: 0.82rem; }
+.bundle-order-list small { margin-top: 2px; color: var(--muted); font-size: 0.72rem; }
+.command-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--surface-2); }
+.command-card-heading h3 { flex: 1; }
+.command-row-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--surface-2); }
+.command-row-title strong { background: transparent; }
+
+@media (max-width: 840px) {
+  .trust-context-grid, .bundle-order-grid { grid-template-columns: 1fr; }
+}

@@ -140,6 +140,18 @@
 
         <div id="status-grid" class="status-grid"></div>
 
+        <section id="trust-context-panel" class="panel trust-context-panel">
+          <div class="panel-heading split-heading">
+            <div>
+              <p class="eyebrow">Trust context</p>
+              <h2>Supplied trust vs host trust</h2>
+              <p>The browser can validate against the Root CA supplied here, but it cannot enumerate the host OS/browser trust store.</p>
+            </div>
+            <a class="secondary-button link-button" href="#commands">Open trust commands</a>
+          </div>
+          <div id="trust-context-results" class="trust-context-grid"></div>
+        </section>
+
         <section class="panel chain-panel">
           <div class="panel-heading">
             <div>
@@ -173,6 +185,16 @@
           </section>
         </div>
 
+        <section id="bundle-analysis-panel" class="panel hidden">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Deployment check</p>
+              <h2>Server bundle order</h2>
+            </div>
+          </div>
+          <div id="bundle-analysis-results"></div>
+        </section>
+
         <section id="diagnosis-panel" class="panel hidden">
           <div class="panel-heading">
             <div>
@@ -205,7 +227,10 @@
               <h2>Diagnostic report</h2>
               <p>Suitable for tickets, change records, notes and incident troubleshooting.</p>
             </div>
-            <button id="copy-report" class="secondary-button" type="button">Copy report</button>
+            <div class="button-row">
+              <button id="copy-report" class="secondary-button" type="button">Copy report</button>
+              <button id="download-report" class="secondary-button" type="button">Download .txt</button>
+            </div>
           </div>
           <pre id="report-output" class="code-output report-output"></pre>
         </section>

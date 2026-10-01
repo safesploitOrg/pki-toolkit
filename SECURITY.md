@@ -31,7 +31,7 @@ The application therefore:
 
 ## Private-key policy
 
-Private-key support is not implemented in `v0.1.0-alpha.1`. When implemented, all of the following are mandatory:
+Private-key support is not implemented in `v0.1.0-alpha.2`. When implemented, all of the following are mandatory:
 
 1. Private keys remain in browser memory only for the operation.
 2. No localStorage.

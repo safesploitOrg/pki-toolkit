@@ -199,7 +199,15 @@ export function analysePemBundle(bundleCerts, selectedPath) {
   const same = actualIds.length === expectedIds.length && actualIds.every((id, index) => id === expectedIds[index]);
 
   const containsRoot = bundleCerts.some((cert) => certId(cert) === certId(selectedPath[selectedPath.length - 1]));
-  if (same) return { status: 'valid', valid: true, containsRoot: false, message: 'Server bundle order is correct: leaf first, followed by intermediate CA certificates' };
+  if (same) return {
+    status: 'valid',
+    valid: true,
+    containsRoot: false,
+    sameSet: true,
+    message: 'Server bundle order is correct: leaf first, followed by intermediate CA certificates',
+    expected,
+    actual: bundleCerts,
+  };
 
   const sameSet = actualIds.length === expectedIds.length && expectedIds.every((id) => actualIds.includes(id));
   return {
@@ -213,6 +221,7 @@ export function analysePemBundle(bundleCerts, selectedPath) {
         ? 'Server bundle contains the expected certificates but they are in the wrong order'
         : 'Server bundle does not match the discovered server chain',
     expected,
+    actual: bundleCerts,
   };
 }
 
@@ -311,9 +320,6 @@ export async function validateChain({ leaf, intermediates, trustAnchors, bundleC
   const time = evaluatePathTime(selectedPath, now);
   const order = analyseGuidedOrder(selectedPath, intermediates);
   const bundle = analysePemBundle(bundleCerts, selectedPath);
-  const chainValid = constraints.valid === true && time.currentlyValid;
-  const chainUnknown = constraints.valid === null;
-
   return {
     graph,
     paths,
@@ -323,13 +329,9 @@ export async function validateChain({ leaf, intermediates, trustAnchors, bundleC
     order,
     bundle,
     chainStatus: {
-      status: chainValid ? 'valid' : chainUnknown ? 'unknown' : 'invalid',
-      valid: chainValid ? true : chainUnknown ? null : false,
-      message: chainValid
-        ? `Cryptographic path validated against the supplied Root CA (${selectedPath.length} certificates)`
-        : chainUnknown
-          ? 'Signature path is valid, but one or more critical constraints are not implemented and prevent a definitive result'
-          : 'A signature path exists, but time or X.509 constraint checks failed',
+      status: 'valid',
+      valid: true,
+      message: `Certificate signatures form a cryptographically valid path to the supplied Root CA (${selectedPath.length} certificates)`,
     },
     trust: {
       suppliedAnchor: true,

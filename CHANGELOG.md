@@ -13,6 +13,22 @@ The format is based on Keep a Changelog. Version numbers follow Semantic Version
 - Private-key certificate matching under `#privatekey`.
 - CSR inspection.
 
+## [0.1.0-alpha.2] - 2026-10-01
+
+### Added
+
+- Dedicated Trust Context panel showing the supplied trust anchor, its SHA-256 fingerprint, and explicit OS/browser trust status as **not inspected**.
+- Detailed server-bundle comparison showing supplied order versus expected TLS order.
+- Downloadable plain-text diagnostic report in addition to clipboard copy.
+- Copy controls for OS trust-store and OpenSSL command snippets.
+- Unit coverage for diagnostic trust reporting and separation of cryptographic path validation from X.509 constraint validation.
+
+### Changed
+
+- Cryptographic path status now reports signature/path validity only; time validity and X.509 constraints remain independent validation dimensions.
+- Bundle analysis now retains both actual and expected certificate sequences for diagnostics and reporting.
+- Bundle/order summary now still warns about guided Intermediate CA field ordering even when an independently supplied server bundle is valid.
+
 ## [0.1.0-alpha.1] - 2026-10-01
 
 ### Added

@@ -17,7 +17,7 @@
 - [x] Basic Constraints / KU / EKU / `pathLenConstraint` checks.
 - [x] Missing-intermediate diagnosis and AIA display.
 - [x] Certificate and SPKI fingerprints.
-- [x] Copyable diagnostic report.
+- [x] Copyable/downloadable diagnostic report.
 - [x] OpenSSL command reference.
 - [x] OS trust-store command reference.
 - [x] Explicit supplied-trust vs OS-trust distinction.

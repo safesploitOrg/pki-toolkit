@@ -227,7 +227,13 @@ function deriveConstraintStatus(result) {
 
 function deriveOrderStatus(result, bundleProvided) {
   if (!result.selectedPath) return { status: 'not-checked', message: 'No complete path available' };
-  if (bundleProvided) return result.bundle;
+  if (bundleProvided) {
+    if (result.bundle.status === 'invalid') return result.bundle;
+    if (!result.order.correct) {
+      return { status: 'warning', message: 'Server bundle is correct, but the guided Intermediate CA fields are ordered incorrectly' };
+    }
+    return result.bundle;
+  }
   return result.order.correct
     ? { status: 'valid', message: 'Guided intermediate order matches the discovered trust path' }
     : { status: 'warning', message: 'Certificates form a path, but the Intermediate CA fields are ordered incorrectly' };
@@ -273,6 +279,65 @@ function renderStatusGrid(result, hostnameResult, bundleProvided) {
     ['Trust context', trust],
   ];
   $('#status-grid').innerHTML = items.map(([title, item]) => renderStatusCard(title, item)).join('');
+}
+
+function renderTrustContext(result) {
+  const container = $('#trust-context-results');
+  const anchor = result.selectedPath?.[result.selectedPath.length - 1] || null;
+  const suppliedStatus = anchor ? 'valid' : 'invalid';
+  const suppliedMeta = statusMeta(suppliedStatus);
+  const anchorName = anchor ? getCertificateDisplayName(anchor) : 'No supplied Root CA was reached';
+  const fingerprint = anchor?.fingerprints?.sha256 || 'Unavailable';
+
+  container.innerHTML = `
+    <article class="trust-context-item">
+      <div class="trust-context-title">
+        <strong>Supplied trust anchor</strong>
+        <span class="mini-status status-${suppliedStatus}">${suppliedMeta.icon} ${suppliedMeta.label}</span>
+      </div>
+      <p>${escapeHtml(anchorName)}</p>
+      <small>SHA-256: <span class="mono">${escapeHtml(fingerprint)}</span></small>
+    </article>
+    <article class="trust-context-item">
+      <div class="trust-context-title">
+        <strong>Operating-system / browser trust</strong>
+        <span class="mini-status status-unknown">? Not inspected</span>
+      </div>
+      <p>Normal browser JavaScript cannot enumerate the host trust store. Use the Commands page to verify whether this Root CA is installed and trusted on the target platform.</p>
+      <small>This is deliberately not inferred from cryptographic path validation.</small>
+    </article>`;
+}
+
+function certificateOrderList(certs) {
+  if (!certs?.length) return '<p class="muted">No certificates</p>';
+  return `<ol class="bundle-order-list">${certs.map((cert) => `<li><strong>${escapeHtml(getCertificateDisplayName(cert))}</strong><small>${escapeHtml(cert.subject.display)}</small></li>`).join('')}</ol>`;
+}
+
+function renderBundleAnalysis(result, bundleProvided) {
+  const panel = $('#bundle-analysis-panel');
+  if (!bundleProvided || !result.selectedPath) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  const meta = statusMeta(result.bundle.status);
+  $('#bundle-analysis-results').innerHTML = `
+    <div class="bundle-summary">
+      <span class="mini-status status-${escapeHtml(result.bundle.status)}">${meta.icon} ${meta.label}</span>
+      <p>${escapeHtml(result.bundle.message)}</p>
+    </div>
+    <div class="bundle-order-grid">
+      <div>
+        <h3>Supplied bundle</h3>
+        ${certificateOrderList(result.bundle.actual || [])}
+      </div>
+      <div>
+        <h3>Expected TLS order</h3>
+        ${certificateOrderList(result.bundle.expected || result.selectedPath.slice(0, -1))}
+        <p class="field-help">Leaf first, then intermediates towards the Root. The Root CA is normally omitted.</p>
+      </div>
+    </div>`;
+  panel.classList.remove('hidden');
 }
 
 function renderChain(result) {
@@ -416,9 +481,11 @@ function renderResults(result, inputs, hostnameResult) {
   overallBadge.textContent = `${statusMeta(overall.status).icon} ${overall.label}`;
 
   renderStatusGrid(result, hostnameResult, bundleProvided);
+  renderTrustContext(result);
   renderChain(result);
   renderTime(result);
   renderConstraints(result);
+  renderBundleAnalysis(result, bundleProvided);
   renderDiagnosis(result);
   renderFullchain(result);
 
@@ -500,9 +567,9 @@ function renderCommands() {
   const update = () => {
     const item = TRUST_COMMANDS[select.value];
     $('#platform-commands').innerHTML = `
-      <article class="command-card"><h3>Install Root CA</h3><pre>${escapeHtml(item.install)}</pre></article>
-      <article class="command-card"><h3>Verify</h3><pre>${escapeHtml(item.verify)}</pre></article>
-      <article class="command-card"><h3>Remove</h3><pre>${escapeHtml(item.remove)}</pre></article>
+      <article class="command-card"><div class="command-card-heading"><h3>Install Root CA</h3><button class="text-button" type="button" data-copy-command>Copy</button></div><pre>${escapeHtml(item.install)}</pre></article>
+      <article class="command-card"><div class="command-card-heading"><h3>Verify</h3><button class="text-button" type="button" data-copy-command>Copy</button></div><pre>${escapeHtml(item.verify)}</pre></article>
+      <article class="command-card"><div class="command-card-heading"><h3>Remove</h3><button class="text-button" type="button" data-copy-command>Copy</button></div><pre>${escapeHtml(item.remove)}</pre></article>
       <p class="command-note">${escapeHtml(item.note)}</p>`;
   };
   select.addEventListener('change', update);
@@ -510,7 +577,7 @@ function renderCommands() {
 
   $('#openssl-commands').innerHTML = OPENSSL_COMMANDS.map((item) => `
     <article class="command-row">
-      <strong>${escapeHtml(item.title)}</strong>
+      <div class="command-row-title"><strong>${escapeHtml(item.title)}</strong><button class="text-button" type="button" data-copy-command>Copy</button></div>
       <pre>${escapeHtml(item.command)}</pre>
     </article>`).join('');
 }
@@ -522,6 +589,13 @@ function wireActions() {
   $('#copy-fullchain').addEventListener('click', (event) => copyText(event.currentTarget, lastFullchain));
   $('#download-fullchain').addEventListener('click', () => downloadText('fullchain.pem', lastFullchain));
   $('#copy-report').addEventListener('click', (event) => copyText(event.currentTarget, lastReport));
+  $('#download-report').addEventListener('click', () => downloadText('certificate-diagnostic-report.txt', lastReport, 'text/plain'));
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-copy-command]');
+    if (!button) return;
+    const pre = button.closest('article')?.querySelector('pre');
+    if (pre) copyText(button, pre.textContent);
+  });
   window.addEventListener('hashchange', setRoute);
 }
 

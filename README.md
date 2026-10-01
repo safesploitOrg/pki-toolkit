@@ -2,7 +2,7 @@
 
 Browser-only X.509 certificate-chain analysis and PKI troubleshooting for homelabs, labs and static GitHub Pages hosting.
 
-> **Status:** `v0.1.0-alpha.1` — implementation has started. The core parser/validator is intentionally conservative and reports unsupported critical semantics as indeterminate rather than claiming success.
+> **Status:** `v0.1.0-alpha.2` — the core certificate-analysis workflow is implemented and under hardening. The core parser/validator is intentionally conservative and reports unsupported critical semantics as indeterminate rather than claiming success.
 
 ## Goals
 
@@ -64,8 +64,9 @@ The Root CA is intentionally omitted from the generated server bundle.
 - Missing intermediate diagnosis, including CA Issuers AIA locations where present.
 - SHA-256 and SHA-1 certificate fingerprints.
 - SHA-256 SPKI fingerprint.
-- Copyable diagnostic report.
-- Root trust-store commands for common operating systems.
+- Copyable and downloadable diagnostic report.
+- Explicit supplied-root vs OS/browser-trust panel and Root SHA-256 fingerprint.
+- Root trust-store commands for common operating systems, with copy controls.
 - OpenSSL troubleshooting commands.
 - Cross-signed / multiple-path architecture and test fixtures.
 

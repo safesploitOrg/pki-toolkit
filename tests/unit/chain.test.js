@@ -91,3 +91,12 @@ test('honours Extended Key Usage constraints on an intermediate CA', async () =>
   assert.equal(result.valid, false);
   assert.ok(result.issues.some((issue) => issue.code === 'ca-server-auth-constrained'));
 });
+
+test('keeps cryptographic path status separate from X.509 constraint status', async () => {
+  const { root, int1, int2, leaf } = await validInputs();
+  int1.extensions.basicConstraints.pathLen = 0;
+  const result = await validateChain({ leaf, intermediates: [int1, int2], trustAnchors: [root] });
+  assert.equal(result.chainStatus.valid, true);
+  assert.equal(result.constraints.valid, false);
+  assert.ok(result.constraints.issues.some((issue) => issue.code === 'pathlen-exceeded'));
+});
