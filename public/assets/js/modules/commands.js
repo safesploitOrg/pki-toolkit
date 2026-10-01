@@ -22,8 +22,7 @@ export const TRUST_COMMANDS = Object.freeze({
   },
   windows: {
     label: 'Windows 10/11 / Windows Server (PowerShell)',
-    install: `Import-Certificate -FilePath .\\root-ca.cer ` +
-      `-CertStoreLocation Cert:\\LocalMachine\\Root`,
+    install: `Import-Certificate -FilePath .\\root-ca.cer -CertStoreLocation Cert:\\LocalMachine\\Root`,
     verify: `Get-ChildItem Cert:\\LocalMachine\\Root |\n  Where-Object Subject -Like '*YOUR ROOT CA NAME*' |\n  Format-List Subject, Thumbprint, NotAfter`,
     remove: `Remove-Item Cert:\\LocalMachine\\Root\\<THUMBPRINT>`,
     note: 'Run an elevated PowerShell session for LocalMachine. CurrentUser\\Root can be used for per-user trust where appropriate.',
@@ -38,32 +37,16 @@ export const TRUST_COMMANDS = Object.freeze({
 });
 
 export const OPENSSL_COMMANDS = Object.freeze([
-  {
-    title: 'Inspect certificate',
-    command: `openssl x509 -in certificate.pem -noout -text`,
-  },
-  {
-    title: 'Show subject, issuer and dates',
-    command: `openssl x509 -in certificate.pem -noout -subject -issuer -dates -serial -fingerprint -sha256`,
-  },
-  {
-    title: 'Show Subject Alternative Names',
-    command: `openssl x509 -in certificate.pem -noout -ext subjectAltName`,
-  },
-  {
-    title: 'Verify leaf against Root + intermediates',
-    command: `openssl verify -CAfile root-ca.pem -untrusted intermediates.pem server.pem`,
-  },
-  {
-    title: 'Fetch a remote TLS chain',
-    command: `openssl s_client -connect server.example.com:443 -servername server.example.com -showcerts </dev/null`,
-  },
-  {
-    title: 'Check certificate/private-key public key match',
-    command: `openssl x509 -in server.pem -pubkey -noout | openssl sha256\nopenssl pkey -in server.key -pubout | openssl sha256`,
-  },
-  {
-    title: 'Inspect a CSR',
-    command: `openssl req -in request.csr -noout -text -verify`,
-  },
+  { title: 'Inspect certificate', command: `openssl x509 -in certificate.pem -noout -text` },
+  { title: 'Show subject, issuer and dates', command: `openssl x509 -in certificate.pem -noout -subject -issuer -dates -serial -fingerprint -sha256` },
+  { title: 'Show Subject Alternative Names', command: `openssl x509 -in certificate.pem -noout -ext subjectAltName` },
+  { title: 'Verify leaf against Root + intermediates', command: `openssl verify -CAfile root-ca.pem -untrusted intermediates.pem server.pem` },
+  { title: 'Fetch a remote TLS chain', command: `openssl s_client -connect server.example.com:443 -servername server.example.com -showcerts </dev/null` },
+  { title: 'Check certificate/private-key public key match', command: `openssl x509 -in server.pem -pubkey -noout | openssl sha256\nopenssl pkey -in server.key -pubout | openssl sha256` },
+  { title: 'Inspect and verify a CSR', command: `openssl req -in request.csr -noout -text -verify` },
+  { title: 'Inspect PKCS#12 / PFX', command: `openssl pkcs12 -in server.p12 -info -noout` },
+  { title: 'Extract certificates from P7B', command: `openssl pkcs7 -in chain.p7b -inform DER -print_certs -out certificates.pem` },
+  { title: 'Inspect a CRL', command: `openssl crl -in ca.crl.pem -noout -text` },
+  { title: 'Verify a CRL signature', command: `openssl crl -in ca.crl.pem -noout -verify -CAfile issuer.pem` },
+  { title: 'Inspect an OCSP response', command: `openssl ocsp -respin response.der -text -noverify` },
 ]);

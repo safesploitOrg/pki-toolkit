@@ -11,7 +11,20 @@ function isIpv6(value) {
   return value.includes(':') && /^[0-9a-f:.]+$/i.test(value);
 }
 
+export function validateDnsPattern(pattern) {
+  const value = normaliseHostname(pattern);
+  if (!value) return { valid: false, reason: 'DNS name is empty' };
+  if (value.includes('..')) return { valid: false, reason: 'DNS name contains an empty label' };
+  const stars = [...value].filter((char) => char === '*').length;
+  if (!stars) return { valid: true };
+  if (stars !== 1 || !value.startsWith('*.')) return { valid: false, reason: 'Wildcard must be the entire left-most label (for example *.example.com)' };
+  if (value.slice(2).split('.').length < 2) return { valid: false, reason: 'Wildcard suffix is too broad' };
+  return { valid: true };
+}
+
 export function dnsNameMatches(pattern, hostname) {
+  const syntax = validateDnsPattern(pattern);
+  if (!syntax.valid) return false;
   const expected = normaliseHostname(pattern);
   const actual = normaliseHostname(hostname);
   if (!expected || !actual) return false;
@@ -25,11 +38,32 @@ export function dnsNameMatches(pattern, hostname) {
   return actualLabels.slice(1).join('.') === suffix;
 }
 
+export function validateSanSyntax(cert) {
+  const issues = [];
+  for (const entry of cert.extensions.subjectAltName || []) {
+    if (entry.type !== 'DNS') continue;
+    const syntax = validateDnsPattern(entry.value);
+    if (!syntax.valid) issues.push({ status: 'invalid', value: entry.value, message: `${entry.value}: ${syntax.reason}` });
+  }
+  return issues;
+}
+
 export function validateHostname(cert, hostname) {
   const target = normaliseHostname(hostname);
   if (!target) return { status: 'not-checked', valid: null, message: 'Hostname not supplied', matches: [] };
 
   const sans = cert.extensions.subjectAltName || [];
+  const malformed = validateSanSyntax(cert);
+  if (malformed.length) {
+    return {
+      status: 'invalid',
+      valid: false,
+      message: `Certificate contains malformed DNS SAN wildcard syntax: ${malformed.map((item) => item.value).join(', ')}`,
+      matches: [],
+      malformed,
+    };
+  }
+
   const ip = isIpv4(target) || isIpv6(target);
   const relevant = sans.filter((entry) => entry.type === (ip ? 'IP' : 'DNS'));
   const matches = relevant.filter((entry) => ip

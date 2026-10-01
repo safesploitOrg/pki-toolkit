@@ -76,6 +76,8 @@ const EXTENSION_OIDS = Object.freeze({
   CRL_DISTRIBUTION_POINTS: '2.5.29.31',
   CERTIFICATE_POLICIES: '2.5.29.32',
   NAME_CONSTRAINTS: '2.5.29.30',
+  POLICY_CONSTRAINTS: '2.5.29.36',
+  INHIBIT_ANY_POLICY: '2.5.29.54',
 });
 
 function parseAlgorithmIdentifier(node) {
@@ -317,9 +319,78 @@ function parseCertificatePolicies(inner) {
   return policies;
 }
 
-function parseExtensions(node) {
-  const extensions = {
+function decodeContextInteger(node) {
+  if (node.tagClass !== TAG_CLASS.CONTEXT) throw new Error('Expected context-specific INTEGER');
+  const bytes = node.value;
+  if (!bytes.length) return 0;
+  let value = 0;
+  for (const b of bytes) value = value * 256 + b;
+  return value;
+}
+
+function parseGeneralSubtrees(node) {
+  const subtrees = [];
+  for (const subtree of readChildren(node)) {
+    const parts = readChildren(subtree);
+    const base = parts[0];
+    if (!base || base.tagClass !== TAG_CLASS.CONTEXT) continue;
+    let parsed = null;
+    if ([1, 2, 6].includes(base.tagNumber)) {
+      const labels = { 1: 'email', 2: 'DNS', 6: 'URI' };
+      parsed = { type: labels[base.tagNumber], value: new TextDecoder('ascii').decode(base.value) };
+    } else if (base.tagNumber === 7) {
+      const bytes = base.value;
+      if (bytes.length === 8) {
+        parsed = { type: 'IP', family: 4, address: bytes.slice(0, 4), mask: bytes.slice(4, 8) };
+      } else if (bytes.length === 32) {
+        parsed = { type: 'IP', family: 6, address: bytes.slice(0, 16), mask: bytes.slice(16, 32) };
+      } else {
+        parsed = { type: 'IP', family: null, raw: bytesToHex(bytes, ':') };
+      }
+    } else {
+      parsed = { type: `other[${base.tagNumber}]`, raw: bytesToHex(base.value) };
+    }
+    const minimumNode = parts.find((part) => part.tagClass === TAG_CLASS.CONTEXT && part.tagNumber === 0);
+    const maximumNode = parts.find((part) => part.tagClass === TAG_CLASS.CONTEXT && part.tagNumber === 1);
+    subtrees.push({
+      ...parsed,
+      minimum: minimumNode ? decodeContextInteger(minimumNode) : 0,
+      maximum: maximumNode ? decodeContextInteger(maximumNode) : null,
+    });
+  }
+  return subtrees;
+}
+
+function parseNameConstraints(inner) {
+  const seq = readDer(inner);
+  const result = { permitted: [], excluded: [] };
+  for (const child of readChildren(seq)) {
+    if (child.tagClass !== TAG_CLASS.CONTEXT) continue;
+    if (child.tagNumber === 0) result.permitted.push(...parseGeneralSubtrees(child));
+    if (child.tagNumber === 1) result.excluded.push(...parseGeneralSubtrees(child));
+  }
+  return result;
+}
+
+function parsePolicyConstraints(inner) {
+  const seq = readDer(inner);
+  const result = { requireExplicitPolicy: null, inhibitPolicyMapping: null };
+  for (const child of readChildren(seq)) {
+    if (child.tagClass !== TAG_CLASS.CONTEXT) continue;
+    if (child.tagNumber === 0) result.requireExplicitPolicy = decodeContextInteger(child);
+    if (child.tagNumber === 1) result.inhibitPolicyMapping = decodeContextInteger(child);
+  }
+  return result;
+}
+
+function parseInhibitAnyPolicy(inner) {
+  return Number(decodeInteger(readDer(inner)));
+}
+
+function blankExtensions() {
+  return {
     raw: [],
+    duplicateOids: [],
     basicConstraints: null,
     keyUsage: null,
     extendedKeyUsage: null,
@@ -329,17 +400,24 @@ function parseExtensions(node) {
     authorityInfoAccess: [],
     crlDistributionPoints: [],
     certificatePolicies: [],
-    hasNameConstraints: false,
+    nameConstraints: null,
+    policyConstraints: null,
+    inhibitAnyPolicy: null,
   };
+}
 
-  const explicitChildren = readChildren(node);
-  const seq = explicitChildren[0];
-  if (!seq) return extensions;
+export function parseExtensionSequence(input) {
+  const seq = input?.encoded ? input : readDer(input);
+  expectTag(seq, TAG_CLASS.UNIVERSAL, 16, 'Extensions');
+  const extensions = blankExtensions();
+  const seen = new Set();
 
   for (const extNode of readChildren(seq)) {
     const parts = readChildren(extNode);
     if (parts.length < 2) continue;
     const oid = decodeOid(parts[0]);
+    if (seen.has(oid) && !extensions.duplicateOids.includes(oid)) extensions.duplicateOids.push(oid);
+    seen.add(oid);
     let index = 1;
     let critical = false;
     if (parts[index]?.tagClass === TAG_CLASS.UNIVERSAL && parts[index]?.tagNumber === 1) {
@@ -381,7 +459,13 @@ function parseExtensions(node) {
           extensions.certificatePolicies = parseCertificatePolicies(octet.value);
           break;
         case EXTENSION_OIDS.NAME_CONSTRAINTS:
-          extensions.hasNameConstraints = true;
+          extensions.nameConstraints = parseNameConstraints(octet.value);
+          break;
+        case EXTENSION_OIDS.POLICY_CONSTRAINTS:
+          extensions.policyConstraints = parsePolicyConstraints(octet.value);
+          break;
+        case EXTENSION_OIDS.INHIBIT_ANY_POLICY:
+          extensions.inhibitAnyPolicy = parseInhibitAnyPolicy(octet.value);
           break;
         default:
           break;
@@ -390,8 +474,13 @@ function parseExtensions(node) {
       raw.parseError = error.message;
     }
   }
-
   return extensions;
+}
+
+function parseExtensions(node) {
+  const explicitChildren = readChildren(node);
+  const seq = explicitChildren[0];
+  return seq ? parseExtensionSequence(seq) : blankExtensions();
 }
 
 function parseRsaPssParameters(parameters) {
@@ -506,6 +595,7 @@ export function parseCertificate(input, pem = null) {
     notAfter,
     publicKey,
     extensions,
+    subjectEmpty: subject.attributes.length === 0,
     signatureAlgorithm: {
       ...signatureAlgorithm,
       ...signatureInfo,
@@ -534,3 +624,5 @@ export const OIDS = Object.freeze({
   SERVER_AUTH: '1.3.6.1.5.5.7.3.1',
   ANY_EKU: '2.5.29.37.0',
 });
+
+export { parseAlgorithmIdentifier, parseName, parseSubjectPublicKeyInfo, parseGeneralName };

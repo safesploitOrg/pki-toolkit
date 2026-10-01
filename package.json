@@ -1,15 +1,16 @@
 {
-  "name": "certificate-tool",
-  "version": "0.1.0-alpha.2",
+  "name": "pki-toolkit",
+  "version": "0.4.0-alpha.1",
   "private": true,
-  "description": "Browser-only X.509 certificate chain analyser and PKI troubleshooting tool.",
+  "description": "Browser-only PKI toolkit for X.509 chain validation, private-key matching, CSR inspection, certificate containers and revocation evidence.",
   "type": "module",
   "scripts": {
     "test": "node --test tests/unit/*.test.js",
     "check:syntax": "find public/assets/js -name '*.js' -print0 | xargs -0 -n1 node --check",
-    "check": "npm run check:syntax && npm test",
+    "check": "npm run check:syntax && npm test && npm run test:differential",
     "serve": "python3 -m http.server 4173 --directory public",
-    "fixtures": "bash scripts/generate-test-pki.sh"
+    "fixtures": "bash scripts/generate-test-pki.sh",
+    "test:differential": "bash scripts/openssl-differential.sh"
   },
   "engines": {
     "node": ">=20"

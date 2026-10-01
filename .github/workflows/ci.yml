@@ -34,8 +34,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -R -nE 'https?://' public; then
-            echo 'Unexpected remote runtime URL found in application assets.' >&2
+          grep -q "connect-src 'none'" public/index.html
+          if grep -R -nE "<(script|link)[^>]+(src|href)=[\"']https?://" public; then
+            echo 'Unexpected remote runtime script/style dependency found.' >&2
             exit 1
           fi
-          grep -q "connect-src 'none'" public/index.html
+          if grep -R -nE '\b(fetch|XMLHttpRequest|WebSocket|EventSource)\b' public/assets/js; then
+            echo 'Unexpected runtime network API found.' >&2
+            exit 1
+          fi
+
+  browser-e2e:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned Playwright test runner
+        run: npm install --no-save @playwright/test@1.56.1
+      - name: Install browser engines
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Browser E2E
+        run: npx playwright test

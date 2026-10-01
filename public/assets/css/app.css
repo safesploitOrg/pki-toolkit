@@ -270,3 +270,22 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 @media (max-width: 840px) {
   .trust-context-grid, .bundle-order-grid { grid-template-columns: 1fr; }
 }
+
+/* PKI Toolkit extensions */
+.brand-icon { width: 36px; height: 36px; object-fit: contain; flex: none; }
+.footer-repo { color: var(--muted); text-decoration: none; }
+.footer-repo:hover { color: var(--accent); text-decoration: underline; }
+.path-controls { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.path-select-wrap { min-width: 240px; margin: 0 !important; font-size: 0.74rem !important; color: var(--muted); }
+.path-select-wrap select { margin-top: 4px; }
+.tool-results { margin-top: 18px; }
+.tool-inline-result { margin-top: 16px; }
+.standalone-details { margin-top: 16px; }
+.inline-pre { margin: 10px 0 0; white-space: pre-wrap; font: inherit; color: inherit; }
+input[type="file"].text-input { padding: 8px; height: auto; }
+.route form.panel { margin: 0; }
+
+@media (max-width: 840px) {
+  .path-controls { width: 100%; justify-content: flex-start; }
+  .path-select-wrap { min-width: 0; width: 100%; }
+}

@@ -1,15 +1,21 @@
 import { parseCertificate, getCertificateDisplayName } from './modules/x509-parser.js';
-import { parseCertificatePem, formatPem } from './modules/pem.js';
+import { parseCertificatePem, parsePemBlocks, formatPem } from './modules/pem.js';
 import { decorateFingerprints } from './modules/crypto.js';
 import { validateChain } from './modules/chain-validator.js';
 import { validateHostname } from './modules/hostname.js';
 import { buildDiagnosticReport } from './modules/report.js';
 import { OPENSSL_COMMANDS, TRUST_COMMANDS } from './modules/commands.js';
+import { analysePrivateKeyMatch } from './modules/private-key.js';
+import { parseCsrText, compareCsrToPrivateKey, compareCsrToCertificate } from './modules/csr.js';
+import { inspectPkcs12, parsePkcs7Certificates } from './modules/formats.js';
+import { parseCrlText, validateCrl, parseOcspResponse, validateOcspResponse } from './modules/revocation.js';
 
-const ROUTES = new Set(['certificate', 'privatekey', 'commands']);
+const ROUTES = new Set(['certificate', 'privatekey', 'csr', 'formats', 'revocation', 'commands']);
 let intermediateCounter = 0;
 let lastFullchain = '';
 let lastReport = '';
+let lastCertificateInputs = null;
+let lastHostnameResult = null;
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -342,20 +348,34 @@ function renderBundleAnalysis(result, bundleProvided) {
 
 function renderChain(result) {
   const container = $('#chain-visual');
+  const selectWrap = $('#path-select-wrap');
+  const select = $('#path-select');
   if (!result.selectedPath) {
     container.innerHTML = '<div class="notice error">No complete cryptographic path could be constructed to a supplied Root CA.</div>';
     $('#path-count').textContent = '';
+    selectWrap.classList.add('hidden');
     return;
   }
-  $('#path-count').textContent = result.paths.length > 1 ? `${result.paths.length} valid paths found · shortest shown` : '1 valid path found';
+  $('#path-count').textContent = result.paths.length > 1 ? `${result.paths.length} valid paths found` : '1 valid path found';
+  if (result.paths.length > 1) {
+    select.innerHTML = result.paths.map((path, index) => {
+      const anchor = getCertificateDisplayName(path[path.length - 1]);
+      return `<option value="${index}" ${index === result.selectedPathIndex ? 'selected' : ''}>Path ${index + 1} · ${escapeHtml(anchor)} · ${path.length} certs</option>`;
+    }).join('');
+    selectWrap.classList.remove('hidden');
+  } else {
+    selectWrap.classList.add('hidden');
+  }
   container.innerHTML = result.selectedPath.map((cert, index) => {
     const role = index === 0 ? 'Server' : index === result.selectedPath.length - 1 ? 'Trust anchor' : `Intermediate ${index}`;
+    const selfState = cert.selfIssued ? (cert.selfSigned ? 'Self-signed' : 'Self-issued, not self-signed') : '';
     const node = `
       <div class="chain-node">
         <span class="chain-role">${escapeHtml(role)}</span>
         <strong>${escapeHtml(getCertificateDisplayName(cert))}</strong>
-        <small>${escapeHtml(cert.subject.display)}</small>
+        <small>${escapeHtml(cert.subject.display || '(empty Subject)')}</small>
         <small>Expires ${escapeHtml(cert.notAfter.toLocaleDateString('en-GB'))}</small>
+        ${selfState ? `<small>${escapeHtml(selfState)}</small>` : ''}
       </div>`;
     const arrow = index < result.selectedPath.length - 1 ? '<div class="chain-arrow" aria-hidden="true">→</div>' : '';
     return node + arrow;
@@ -434,22 +454,33 @@ function renderCertificateDetails(certs) {
     const ku = cert.extensions.keyUsage?.usages?.join(', ') || 'Not present';
     const eku = cert.extensions.extendedKeyUsage?.map((item) => item.name).join(', ') || 'Not present';
     const sans = cert.extensions.subjectAltName?.map((item) => `${item.type}:${item.value}`).join(', ') || 'Not present';
+    const nc = cert.extensions.nameConstraints;
+    const ncText = nc ? `Permitted: ${nc.permitted.map((item) => item.value || item.raw || item.type).join(', ') || 'none'}; Excluded: ${nc.excluded.map((item) => item.value || item.raw || item.type).join(', ') || 'none'}` : 'Not present';
+    const policies = cert.extensions.certificatePolicies?.join(', ') || 'Not present';
+    const policyConstraints = cert.extensions.policyConstraints ? JSON.stringify(cert.extensions.policyConstraints) : 'Not present';
+    const selfState = cert.selfIssued ? (cert.selfSigned ? 'Self-issued and self-signed' : 'Self-issued but not self-signed') : 'No';
     return `
       <details class="cert-detail" ${index === 0 ? 'open' : ''}>
         <summary><strong>${escapeHtml(getCertificateDisplayName(cert))}</strong><span class="muted">${escapeHtml(cert.inputRole || cert.role)}</span></summary>
         <div class="cert-detail-body">
           <dl class="detail-grid">
-            <dt>Subject</dt><dd>${escapeHtml(cert.subject.display)}</dd>
+            <dt>Subject</dt><dd>${escapeHtml(cert.subject.display || '(empty Subject)')}</dd>
             <dt>Issuer</dt><dd>${escapeHtml(cert.issuer.display)}</dd>
             <dt>Serial</dt><dd class="mono">${escapeHtml(cert.serialNumber)}</dd>
             <dt>Valid from</dt><dd>${escapeHtml(cert.notBefore.toISOString())}</dd>
             <dt>Valid until</dt><dd>${escapeHtml(cert.notAfter.toISOString())}</dd>
             <dt>Public key</dt><dd>${escapeHtml(formatKey(cert))}</dd>
             <dt>Signature</dt><dd>${escapeHtml(cert.signatureAlgorithm.name)}</dd>
+            <dt>Self-issued / signed</dt><dd>${escapeHtml(selfState)}</dd>
             <dt>Basic Constraints</dt><dd>${basic ? `CA=${basic.ca}${basic.pathLen !== null ? `, pathLen=${basic.pathLen}` : ''}` : 'Not present'}</dd>
             <dt>Key Usage</dt><dd>${escapeHtml(ku)}</dd>
             <dt>Extended Key Usage</dt><dd>${escapeHtml(eku)}</dd>
             <dt>Subject Alt Name</dt><dd>${escapeHtml(sans)}</dd>
+            <dt>Name Constraints</dt><dd>${escapeHtml(ncText)}</dd>
+            <dt>Certificate Policies</dt><dd>${escapeHtml(policies)}</dd>
+            <dt>Policy Constraints</dt><dd>${escapeHtml(policyConstraints)}</dd>
+            <dt>Inhibit anyPolicy</dt><dd>${escapeHtml(cert.extensions.inhibitAnyPolicy ?? 'Not present')}</dd>
+            <dt>Duplicate extensions</dt><dd>${escapeHtml(cert.extensions.duplicateOids?.join(', ') || 'None')}</dd>
             <dt>Subject Key ID</dt><dd class="mono">${escapeHtml(cert.extensions.subjectKeyIdentifier || 'Not present')}</dd>
             <dt>Authority Key ID</dt><dd class="mono">${escapeHtml(cert.extensions.authorityKeyIdentifier || 'Not present')}</dd>
             <dt>SHA-256 fingerprint</dt><dd class="mono">${escapeHtml(cert.fingerprints?.sha256 || '')}</dd>
@@ -473,7 +504,9 @@ function renderFullchain(result) {
   panel.classList.remove('hidden');
 }
 
-function renderResults(result, inputs, hostnameResult) {
+function renderResults(result, inputs, hostnameResult, { scroll = true } = {}) {
+  lastCertificateInputs = inputs;
+  lastHostnameResult = hostnameResult;
   const bundleProvided = inputs.bundleCerts.length > 0;
   const overall = deriveOverallStatus(result, hostnameResult, bundleProvided);
   const overallBadge = $('#overall-badge');
@@ -494,7 +527,7 @@ function renderResults(result, inputs, hostnameResult) {
   lastReport = buildDiagnosticReport({ result, leaf: inputs.leaf, hostnameResult });
   $('#report-output').textContent = lastReport;
   $('#results').classList.remove('hidden');
-  $('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (scroll) $('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function analyse(event) {
@@ -527,6 +560,8 @@ function clearCertificateForm() {
   $('#results').classList.add('hidden');
   lastFullchain = '';
   lastReport = '';
+  lastCertificateInputs = null;
+  lastHostnameResult = null;
 }
 
 async function copyText(button, text) {
@@ -582,14 +617,242 @@ function renderCommands() {
     </article>`).join('');
 }
 
+
+function setToolError(selector, message = '') {
+  const box = $(selector);
+  if (!box) return;
+  box.textContent = message;
+  box.classList.toggle('hidden', !message);
+}
+
+function detailRows(entries) {
+  return `<dl class="detail-grid standalone-details">${entries.map(([label, value, mono = false]) => `<dt>${escapeHtml(label)}</dt><dd${mono ? ' class="mono"' : ''}>${escapeHtml(value ?? '—')}</dd>`).join('')}</dl>`;
+}
+
+async function handlePrivateKey(event) {
+  event.preventDefault();
+  setToolError('#privatekey-error');
+  try {
+    const [cert] = await parsePemCertificates($('#key-certificate-input').value, 'Certificate', { allowMany: false, required: true });
+    const keyText = $('#private-key-input').value;
+    if (!keyText.trim()) throw new Error('Private key is required');
+    const password = $('#private-key-password').value;
+    const result = await analysePrivateKeyMatch(cert, keyText, password);
+    const meta = statusMeta(result.status);
+    const status = $('#privatekey-status');
+    status.className = `status-pill status-${result.status}`;
+    status.textContent = `${meta.icon} ${result.message}`;
+    $('#privatekey-details').innerHTML = detailRows([
+      ['Certificate', getCertificateDisplayName(cert)],
+      ['Key algorithm', result.curve ? `${result.family} ${result.curve}` : result.family],
+      ['Key container', `${result.originalLabel}${result.encrypted ? ' (encrypted)' : ''}`],
+      ['Certificate SPKI SHA-256', result.certificateSpkiSha256, true],
+      ['Private-key SPKI SHA-256', result.privateSpkiSha256, true],
+    ]);
+    $('#privatekey-results').classList.remove('hidden');
+    $('#private-key-password').value = '';
+  } catch (error) {
+    $('#privatekey-results').classList.add('hidden');
+    setToolError('#privatekey-error', error?.message || String(error));
+  }
+}
+
+function clearPrivateKey() {
+  $('#private-key-input').value = '';
+  $('#private-key-password').value = '';
+  $('#privatekey-results').classList.add('hidden');
+  setToolError('#privatekey-error');
+}
+
+function renderCsr(csr, keyResult, certComparison) {
+  const invalid = csr.signature.valid === false || keyResult?.match === false || certComparison?.valid === false;
+  const unknown = csr.signature.valid === null;
+  const state = invalid ? 'invalid' : unknown ? 'unknown' : 'valid';
+  const meta = statusMeta(state);
+  const status = $('#csr-status');
+  status.className = `status-pill status-${state}`;
+  status.textContent = `${meta.icon} ${invalid ? 'Issues found' : unknown ? 'Signature indeterminate' : 'CSR valid'}`;
+  const sans = csr.extensions?.subjectAltName || [];
+  const sections = [
+    detailRows([
+      ['Subject', csr.subject.display || '(empty Subject)'],
+      ['Public key', csr.publicKey.algorithm === 'EC' ? `${csr.publicKey.algorithm} ${csr.publicKey.curve || ''}`.trim() : `${csr.publicKey.algorithm}${csr.publicKey.bits ? ` ${csr.publicKey.bits}-bit` : ''}`],
+      ['Signature', csr.signatureAlgorithm.name],
+      ['CSR signature', csr.signature.message],
+      ['SPKI SHA-256', csr.spkiSha256, true],
+      ['Requested SANs', sans.length ? sans.map((item) => `${item.type}:${item.value}`).join(', ') : 'None'],
+    ]),
+  ];
+  if (keyResult) sections.push(`<div class="notice ${keyResult.match ? 'info' : 'error'}"><strong>Private-key comparison:</strong> ${escapeHtml(keyResult.message)}</div>`);
+  if (certComparison) {
+    const lines = [
+      `Subject: ${certComparison.subjectMatches ? 'match' : 'different'}`,
+      `Public key: ${certComparison.spkiMatches ? 'match' : 'different'}`,
+      `Missing requested SANs: ${certComparison.missingSans.length ? certComparison.missingSans.join(', ') : 'none'}`,
+      `Additional issued SANs: ${certComparison.addedSans.length ? certComparison.addedSans.join(', ') : 'none'}`,
+    ];
+    sections.push(`<div class="notice ${certComparison.valid ? 'info' : 'error'}"><strong>Issued-certificate comparison</strong><pre class="inline-pre">${escapeHtml(lines.join('\n'))}</pre></div>`);
+  }
+  $('#csr-details').innerHTML = sections.join('');
+  $('#csr-results').classList.remove('hidden');
+}
+
+async function handleCsr(event) {
+  event.preventDefault();
+  setToolError('#csr-error');
+  try {
+    const csr = await parseCsrText($('#csr-input').value);
+    let keyResult = null;
+    if ($('#csr-key-input').value.trim()) keyResult = await compareCsrToPrivateKey(csr, $('#csr-key-input').value, $('#csr-key-password').value);
+    let certComparison = null;
+    if ($('#csr-cert-input').value.trim()) {
+      const [cert] = await parsePemCertificates($('#csr-cert-input').value, 'Issued certificate', { allowMany: false, required: true });
+      certComparison = compareCsrToCertificate(csr, cert);
+    }
+    renderCsr(csr, keyResult, certComparison);
+    $('#csr-key-password').value = '';
+  } catch (error) {
+    $('#csr-results').classList.add('hidden');
+    setToolError('#csr-error', error?.message || String(error));
+  }
+}
+
+function clearCsr() {
+  $('#csr-form').reset();
+  $('#csr-results').classList.add('hidden');
+  setToolError('#csr-error');
+}
+
+function renderCertificateInventory(certs) {
+  if (!certs.length) return '<p class="muted">No X.509 certificates found.</p>';
+  return `<ol class="bundle-order-list">${certs.map((cert) => `<li><strong>${escapeHtml(getCertificateDisplayName(cert))}</strong><small>${escapeHtml(cert.subject.display || '(empty Subject)')} · ${escapeHtml(cert.fingerprints?.sha256 || '')}</small></li>`).join('')}</ol>`;
+}
+
+async function handlePkcs7(event) {
+  event.preventDefault();
+  const target = $('#pkcs7-result');
+  try {
+    const file = $('#pkcs7-file').files?.[0];
+    if (!file) throw new Error('Choose a PKCS#7/P7B file');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    const block = parsePemBlocks(text).find((item) => ['PKCS7', 'CMS'].includes(item.label));
+    const certs = await parsePkcs7Certificates(block ? block.der : bytes);
+    target.innerHTML = `<div class="notice info"><strong>${certs.length}</strong> certificate${certs.length === 1 ? '' : 's'} extracted.</div>${renderCertificateInventory(certs)}`;
+  } catch (error) {
+    target.innerHTML = `<div class="notice error">${escapeHtml(error?.message || String(error))}</div>`;
+  }
+}
+
+async function handlePkcs12(event) {
+  event.preventDefault();
+  const target = $('#pkcs12-result');
+  try {
+    const file = $('#pkcs12-file').files?.[0];
+    if (!file) throw new Error('Choose a PKCS#12/PFX file');
+    const result = await inspectPkcs12(new Uint8Array(await file.arrayBuffer()), $('#pkcs12-password').value);
+    const keys = result.keys.length ? result.keys.map((key) => `${key.family}${key.curve ? ` ${key.curve}` : ''}${key.encrypted ? ' (encrypted bag)' : ''}`).join(', ') : 'None';
+    target.innerHTML = `${detailRows([
+      ['PFX version', String(result.version)],
+      ['Certificates', String(result.certificates.length)],
+      ['Private keys', String(result.keys.length)],
+      ['Key types', keys],
+      ['MAC present', result.hasMacData ? 'Yes (integrity MAC presence detected; MAC verification is not claimed)' : 'No'],
+      ['Unsupported content types', result.unsupportedContentTypes.length ? result.unsupportedContentTypes.join(', ') : 'None'],
+    ])}${renderCertificateInventory(result.certificates)}`;
+    $('#pkcs12-password').value = '';
+  } catch (error) {
+    target.innerHTML = `<div class="notice error">${escapeHtml(error?.message || String(error))}</div>`;
+    $('#pkcs12-password').value = '';
+  }
+}
+
+function clearPkcs12Password() {
+  $('#pkcs12-password').value = '';
+  $('#pkcs12-result').innerHTML = '';
+}
+
+async function handleCrl(event) {
+  event.preventDefault();
+  const target = $('#crl-result');
+  try {
+    const crl = parseCrlText($('#crl-input').value);
+    const [issuer] = await parsePemCertificates($('#crl-issuer-input').value, 'CRL issuer certificate', { allowMany: false, required: true });
+    const certs = await parsePemCertificates($('#crl-cert-input').value, 'Certificate to check', { allowMany: false, required: false });
+    const checked = certs[0] || null;
+    const result = await validateCrl(crl, issuer, checked);
+    const certStatus = !checked ? 'Not checked' : result.certificateStatus?.revoked ? `REVOKED · ${result.certificateStatus.entry.revocationDate.toISOString()}` : 'Not listed in this CRL';
+    target.innerHTML = detailRows([
+      ['Issuer', crl.issuer.display],
+      ['This Update', crl.thisUpdate.toISOString()],
+      ['Next Update', crl.nextUpdate?.toISOString() || 'Not present'],
+      ['Revoked entries', String(crl.revoked.length)],
+      ['CRL signature', result.signature.message],
+      ['Freshness', result.stale === true ? 'Stale / nextUpdate passed' : result.stale === false ? 'Within nextUpdate window' : 'No nextUpdate'],
+      ['Certificate status', certStatus],
+    ]);
+  } catch (error) {
+    target.innerHTML = `<div class="notice error">${escapeHtml(error?.message || String(error))}</div>`;
+  }
+}
+
+async function parseOcspFile(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  const block = parsePemBlocks(text).find((item) => ['OCSP RESPONSE', 'OCSPRESPONSE'].includes(item.label));
+  return parseOcspResponse(block ? block.der : bytes);
+}
+
+async function handleOcsp(event) {
+  event.preventDefault();
+  const target = $('#ocsp-result');
+  try {
+    const file = $('#ocsp-file').files?.[0];
+    if (!file) throw new Error('Choose an OCSP response file');
+    const ocsp = await parseOcspFile(file);
+    const [issuer] = await parsePemCertificates($('#ocsp-issuer-input').value, 'OCSP issuer certificate', { allowMany: false, required: true });
+    const certs = await parsePemCertificates($('#ocsp-cert-input').value, 'Certificate to check', { allowMany: false, required: false });
+    const checked = certs[0] || null;
+    const result = await validateOcspResponse(ocsp, issuer, checked);
+    const single = result.single;
+    target.innerHTML = detailRows([
+      ['OCSP response status', String(ocsp.responseStatus)],
+      ['Produced At', ocsp.basic?.producedAt?.toISOString() || 'Unavailable'],
+      ['Response entries', String(ocsp.basic?.responses?.length || 0)],
+      ['Signer', result.signer ? getCertificateDisplayName(result.signer) : 'Unavailable'],
+      ['Signature', result.signature?.message || result.message || 'Not verified'],
+      ['Delegated signer', result.delegated ? (result.authorised ? 'Yes · OCSP Signing EKU present' : 'Yes · not authorised by EKU') : 'No / issuer signed'],
+      ['Certificate status', single ? single.certStatus.toUpperCase() : checked ? 'No matching SingleResponse' : 'Not checked'],
+      ['This Update', single?.thisUpdate?.toISOString() || '—'],
+      ['Next Update', single?.nextUpdate?.toISOString() || '—'],
+    ]);
+  } catch (error) {
+    target.innerHTML = `<div class="notice error">${escapeHtml(error?.message || String(error))}</div>`;
+  }
+}
+
 function wireActions() {
   $('#certificate-form').addEventListener('submit', analyse);
   $('#add-intermediate').addEventListener('click', () => addIntermediate());
   $('#clear-button').addEventListener('click', clearCertificateForm);
+  $('#path-select').addEventListener('change', async (event) => {
+    if (!lastCertificateInputs) return;
+    const result = await validateChain({ ...lastCertificateInputs, preferredPathIndex: Number(event.currentTarget.value) });
+    renderResults(result, lastCertificateInputs, lastHostnameResult || validateHostname(lastCertificateInputs.leaf, lastCertificateInputs.hostname), { scroll: false });
+  });
   $('#copy-fullchain').addEventListener('click', (event) => copyText(event.currentTarget, lastFullchain));
   $('#download-fullchain').addEventListener('click', () => downloadText('fullchain.pem', lastFullchain));
   $('#copy-report').addEventListener('click', (event) => copyText(event.currentTarget, lastReport));
   $('#download-report').addEventListener('click', () => downloadText('certificate-diagnostic-report.txt', lastReport, 'text/plain'));
+  $('#privatekey-form').addEventListener('submit', handlePrivateKey);
+  $('#privatekey-clear').addEventListener('click', clearPrivateKey);
+  $('#csr-form').addEventListener('submit', handleCsr);
+  $('#csr-clear').addEventListener('click', clearCsr);
+  $('#pkcs7-form').addEventListener('submit', handlePkcs7);
+  $('#pkcs12-form').addEventListener('submit', handlePkcs12);
+  $('#pkcs12-clear').addEventListener('click', clearPkcs12Password);
+  $('#crl-form').addEventListener('submit', handleCrl);
+  $('#ocsp-form').addEventListener('submit', handleOcsp);
   document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-copy-command]');
     if (!button) return;
@@ -600,6 +863,8 @@ function wireActions() {
 }
 
 function init() {
+  const year = $('#footer-year');
+  if (year) year.textContent = String(new Date().getFullYear());
   addIntermediate();
   setRoute();
   wireFileInputs();

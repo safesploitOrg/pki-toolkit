@@ -4,3 +4,7 @@ coverage/
 playwright-report/
 test-results/
 *.log
+
+# Generated disposable PKI fixtures. CI and developers regenerate these with
+# `npm run fixtures`; never commit generated private keys or PKCS#12 files.
+tests/fixtures/

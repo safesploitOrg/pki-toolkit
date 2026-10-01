@@ -4,25 +4,29 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'">
-  <title>Certificate Tool</title>
-  <meta name="description" content="Local, browser-only X.509 certificate chain validation and PKI troubleshooting.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; worker-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'self'">
+  <title>PKI Toolkit</title>
+  <meta name="description" content="Browser-only PKI toolkit for X.509 chain validation, private-key matching, CSR inspection and revocation analysis.">
+  <link rel="icon" type="image/png" sizes="96x96" href="./assets/images/favicon/certificate-96x96.png">
   <link rel="stylesheet" href="./assets/css/app.css">
   <script type="module" src="./assets/js/app.js"></script>
 </head>
 <body>
   <header class="site-header">
     <div class="shell header-inner">
-      <a class="brand" href="#certificate" aria-label="Certificate Tool home">
-        <span class="brand-mark" aria-hidden="true">🔐</span>
+      <a class="brand" href="#certificate" aria-label="PKI Toolkit home">
+        <img class="brand-icon" src="./assets/images/favicon/certificate-96x96.png" width="36" height="36" alt="">
         <span>
-          <strong>Certificate Tool</strong>
-          <small>X.509 chain analysis &amp; PKI troubleshooting</small>
+          <strong>PKI Toolkit</strong>
+          <small>X.509, keys, CSRs &amp; revocation diagnostics</small>
         </span>
       </a>
       <nav class="primary-nav" aria-label="Primary navigation">
         <a href="#certificate" data-route-link="certificate">Certificate</a>
         <a href="#privatekey" data-route-link="privatekey">Private Key</a>
+        <a href="#csr" data-route-link="csr">CSR</a>
+        <a href="#formats" data-route-link="formats">Formats</a>
+        <a href="#revocation" data-route-link="revocation">Revocation</a>
         <a href="#commands" data-route-link="commands">Commands</a>
       </nav>
     </div>
@@ -158,7 +162,12 @@
               <p class="eyebrow">Discovered path</p>
               <h2>Certificate chain</h2>
             </div>
-            <span id="path-count" class="muted"></span>
+            <div class="path-controls">
+              <span id="path-count" class="muted"></span>
+              <label id="path-select-wrap" class="path-select-wrap hidden" for="path-select">Certification path
+                <select id="path-select"></select>
+              </label>
+            </div>
           </div>
           <div id="chain-visual" class="chain-visual"></div>
         </section>
@@ -250,31 +259,116 @@
     <section class="route hidden" data-route="privatekey">
       <div class="page-heading">
         <div>
-          <p class="eyebrow">Roadmap</p>
-          <h1>Certificate ↔ private-key validation</h1>
-          <p>This surface is reserved for the next implementation phase. The security boundary is defined now so private-key handling cannot accidentally become persistent later.</p>
+          <p class="eyebrow">Private-key validation</p>
+          <h1>Match a certificate to its private key</h1>
+          <p>Public-key comparison runs entirely in browser memory. Private-key material is never persisted, logged or transmitted.</p>
         </div>
+        <div class="privacy-badge"><span aria-hidden="true">🛡️</span><span><strong>Ephemeral</strong><small>Memory only</small></span></div>
       </div>
-      <div class="results-columns">
+      <form id="privatekey-form" novalidate>
+        <div class="results-columns">
+          <section class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">Certificate</p><h2>Certificate</h2></div></div>
+            <label for="key-certificate-input">PEM certificate</label>
+            <textarea id="key-certificate-input" spellcheck="false" autocomplete="off" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+          </section>
+          <section class="panel security-panel">
+            <div class="panel-heading"><div><p class="eyebrow">Secret material</p><h2>Private key</h2></div></div>
+            <label for="private-key-input">PEM private key</label>
+            <textarea id="private-key-input" spellcheck="false" autocomplete="off" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+            <label for="private-key-password">Password <span class="muted">(encrypted PKCS#8 only)</span></label>
+            <input id="private-key-password" class="text-input" type="password" autocomplete="off" spellcheck="false">
+          </section>
+        </div>
+        <div id="privatekey-error" class="notice error hidden" role="alert"></div>
+        <div class="form-actions">
+          <button id="privatekey-analyse" class="primary-button" type="submit">Compare key</button>
+          <button id="privatekey-clear" class="secondary-button" type="button">Clear private key</button>
+        </div>
+      </form>
+      <section id="privatekey-results" class="panel hidden tool-results" aria-live="polite">
+        <div class="panel-heading"><div><p class="eyebrow">Result</p><h2>Certificate ↔ private key</h2></div><span id="privatekey-status" class="status-pill"></span></div>
+        <div id="privatekey-details" class="detail-grid standalone-details"></div>
+      </section>
+      <section class="panel security-panel tool-results">
+        <h2>Private-key handling policy</h2>
+        <ul class="feature-list">
+          <li>Key material remains in browser memory only and is never uploaded.</li>
+          <li>No localStorage, sessionStorage, IndexedDB, cookies, analytics or telemetry.</li>
+          <li>Private keys are excluded from reports, URLs and console logging.</li>
+          <li>Clear removes the key and password from application references and form controls.</li>
+        </ul>
+      </section>
+    </section>
+
+    <section class="route hidden" data-route="csr">
+      <div class="page-heading"><div><p class="eyebrow">PKCS#10</p><h1>Inspect and validate a CSR</h1><p>Verify the CSR signature, inspect requested SANs and compare the request with a private key or issued certificate.</p></div></div>
+      <form id="csr-form" novalidate>
         <section class="panel">
-          <h2>Planned checks</h2>
-          <ul class="feature-list">
-            <li>Derive the public key from a supplied private key and compare it with the certificate SPKI.</li>
-            <li>RSA, ECDSA and modern key formats where browser Web Crypto support permits.</li>
-            <li>Certificate/key algorithm and key-size information.</li>
-            <li>Explicit match / mismatch result without transmitting key material.</li>
-          </ul>
+          <label for="csr-input">Certificate Signing Request</label>
+          <textarea id="csr-input" spellcheck="false" autocomplete="off" placeholder="-----BEGIN CERTIFICATE REQUEST-----"></textarea>
         </section>
-        <section class="panel security-panel">
-          <h2>Private-key handling policy</h2>
-          <ul class="feature-list">
-            <li>Never uploaded or sent over the network.</li>
-            <li>Never written to localStorage, sessionStorage, IndexedDB or cookies.</li>
-            <li>Never included in diagnostic reports, logs or telemetry.</li>
-            <li>Held only in memory for the operation and cleared from application references afterwards.</li>
-            <li>No third-party analytics or CDN JavaScript.</li>
-          </ul>
-        </section>
+        <div class="results-columns">
+          <section class="panel">
+            <details><summary>Compare with private key <span class="muted">(optional)</span></summary>
+              <label for="csr-key-input">Private key</label><textarea id="csr-key-input" class="small-textarea" spellcheck="false"></textarea>
+              <label for="csr-key-password">Password</label><input id="csr-key-password" class="text-input" type="password" autocomplete="off">
+            </details>
+          </section>
+          <section class="panel">
+            <details><summary>Compare with issued certificate <span class="muted">(optional)</span></summary>
+              <label for="csr-cert-input">Issued certificate</label><textarea id="csr-cert-input" class="small-textarea" spellcheck="false"></textarea>
+            </details>
+          </section>
+        </div>
+        <div id="csr-error" class="notice error hidden" role="alert"></div>
+        <div class="form-actions"><button class="primary-button" type="submit">Inspect CSR</button><button id="csr-clear" class="secondary-button" type="button">Clear</button></div>
+      </form>
+      <section id="csr-results" class="panel hidden tool-results" aria-live="polite">
+        <div class="panel-heading"><div><p class="eyebrow">CSR analysis</p><h2>Request details</h2></div><span id="csr-status" class="status-pill"></span></div>
+        <div id="csr-details"></div>
+      </section>
+    </section>
+
+    <section class="route hidden" data-route="formats">
+      <div class="page-heading"><div><p class="eyebrow">Certificate containers</p><h1>Inspect DER, PKCS#7 and PKCS#12</h1><p>Decode common certificate containers locally. PFX/P12 passwords are used only in memory.</p></div></div>
+      <div class="results-columns">
+        <form id="pkcs7-form" class="panel">
+          <div class="panel-heading"><div><p class="eyebrow">P7B / P7C</p><h2>PKCS#7 certificate bundle</h2></div></div>
+          <label for="pkcs7-file">Choose P7B/P7C file</label><input id="pkcs7-file" class="text-input" type="file" accept=".p7b,.p7c,.pkcs7,.pem">
+          <div class="form-actions"><button class="primary-button" type="submit">Inspect bundle</button></div>
+          <div id="pkcs7-result" class="tool-inline-result"></div>
+        </form>
+        <form id="pkcs12-form" class="panel security-panel">
+          <div class="panel-heading"><div><p class="eyebrow">PFX / P12</p><h2>PKCS#12 container</h2></div></div>
+          <label for="pkcs12-file">Choose PFX/P12 file</label><input id="pkcs12-file" class="text-input" type="file" accept=".pfx,.p12,application/x-pkcs12">
+          <label for="pkcs12-password">Password</label><input id="pkcs12-password" class="text-input" type="password" autocomplete="off">
+          <div class="form-actions"><button class="primary-button" type="submit">Inspect PFX</button><button id="pkcs12-clear" class="secondary-button" type="button">Clear password</button></div>
+          <div id="pkcs12-result" class="tool-inline-result"></div>
+        </form>
+      </div>
+      <div class="notice info"><strong>Compatibility:</strong> PFX/P12 support targets modern PBES2 + PBKDF2 + AES-CBC containers. Legacy PKCS#12 PBE algorithms are reported as unsupported rather than silently mishandled.</div>
+    </section>
+
+    <section class="route hidden" data-route="revocation">
+      <div class="page-heading"><div><p class="eyebrow">Revocation</p><h1>Inspect CRL and OCSP evidence</h1><p>Import revocation evidence instead of automatically contacting CA endpoints, preserving the application's no-network privacy model.</p></div></div>
+      <div class="results-columns">
+        <form id="crl-form" class="panel">
+          <div class="panel-heading"><div><p class="eyebrow">CRL</p><h2>Certificate Revocation List</h2></div></div>
+          <label for="crl-input">PEM CRL</label><textarea id="crl-input" spellcheck="false" placeholder="-----BEGIN X509 CRL-----"></textarea>
+          <label for="crl-issuer-input">Issuer CA certificate</label><textarea id="crl-issuer-input" class="small-textarea" spellcheck="false"></textarea>
+          <label for="crl-cert-input">Certificate to check <span class="muted">(optional)</span></label><textarea id="crl-cert-input" class="small-textarea" spellcheck="false"></textarea>
+          <div class="form-actions"><button class="primary-button" type="submit">Validate CRL</button></div>
+          <div id="crl-result" class="tool-inline-result"></div>
+        </form>
+        <form id="ocsp-form" class="panel">
+          <div class="panel-heading"><div><p class="eyebrow">OCSP</p><h2>OCSP response</h2></div></div>
+          <label for="ocsp-file">DER/PEM OCSP response</label><input id="ocsp-file" class="text-input" type="file" accept=".der,.ocsp,.pem">
+          <label for="ocsp-issuer-input">Issuer CA certificate</label><textarea id="ocsp-issuer-input" class="small-textarea" spellcheck="false"></textarea>
+          <label for="ocsp-cert-input">Certificate to check <span class="muted">(optional)</span></label><textarea id="ocsp-cert-input" class="small-textarea" spellcheck="false"></textarea>
+          <div class="form-actions"><button class="primary-button" type="submit">Validate OCSP</button></div>
+          <div id="ocsp-result" class="tool-inline-result"></div>
+        </form>
       </div>
     </section>
 
@@ -314,8 +408,8 @@
 
   <footer class="site-footer">
     <div class="shell footer-inner">
-      <span>Certificate Tool</span>
-      <span>Browser-only · no backend · no telemetry</span>
+      <span>© <span id="footer-year">2026</span> · PKI Toolkit</span>
+      <a class="footer-repo" href="https://github.com/safesploitOrg/pki-toolkit" target="_blank" rel="noopener noreferrer">github.com/safesploitOrg/pki-toolkit ↗</a>
     </div>
   </footer>
 </body>

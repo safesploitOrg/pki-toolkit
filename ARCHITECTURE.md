@@ -2,319 +2,221 @@
 
 ## 1. Purpose
 
-Certificate Tool is a static browser application for inspecting and validating X.509 certificate chains without transmitting certificate or private-key material to a backend.
+PKI Toolkit is a static browser application for PKI inspection and troubleshooting without transmitting certificate, key or password material to a backend.
 
-The first release surface is `#certificate`; `#privatekey` and additional PKI tooling are planned extensions.
+Routes:
+
+```text
+#certificate   X.509 chain/path/bundle/hostname analysis
+#privatekey    certificate ↔ private-key validation
+#csr           PKCS#10 inspection and comparisons
+#formats       DER / PKCS#7 / PKCS#12 inspection
+#revocation    CRL / OCSP evidence analysis
+#commands      OS trust-store and OpenSSL reference
+```
 
 ## 2. Design principles
 
-1. **Local-first and static-hostable** — GitHub Pages must be sufficient.
-2. **No fixed chain depth** — the UI begins with one optional intermediate, but the model stores intermediates as an array and path discovery is graph-based.
-3. **Separate validation dimensions** — cryptographic path, order, time, hostname, X.509 constraints and trust context are independent results.
-4. **Do not overclaim trust** — supplied-root validation is not equivalent to OS/browser trust.
-5. **No home-grown cryptography** — signature and digest operations use Web Crypto. The application decodes certificate structure but does not implement cryptographic primitives.
-6. **Fail closed on unknown critical semantics** — unsupported critical extensions prevent a definitive green result.
-7. **Private-key safety by construction** — no persistence, telemetry or network path for private-key material.
+1. Local-first and GitHub-Pages compatible.
+2. No fixed trust-chain depth in the data model.
+3. Chain construction is graph based and cycle safe.
+4. Cryptographic path, deployment order, time, hostname, constraints and trust context are independent dimensions.
+5. Never equate supplied trust with host/OS trust.
+6. Use Web Crypto for cryptographic primitives.
+7. Unknown critical semantics produce an indeterminate result rather than a false pass.
+8. Secret material is never deliberately persisted or transmitted.
+9. Network-assisted AIA/OCSP/CRL retrieval is disabled in the public build.
 
-## 3. High-level flow
-
-```text
-PEM / DER input
-      |
-      v
-PEM normalisation
-      |
-      v
-DER/X.509 structural parser
-      |
-      +----> identity / SAN / KU / EKU / Basic Constraints / AIA
-      |
-      v
-Certificate graph
-      |
-      +----> issuer-name + AKI/SKI candidate matching
-      |
-      v
-Web Crypto signature verification
-      |
-      v
-All valid paths to supplied trust anchor(s)
-      |
-      +----> time sanity
-      +----> X.509 constraints
-      +----> hostname/SAN
-      +----> bundle order
-      +----> corrected fullchain.pem
-      +----> diagnostic report
-```
-
-## 4. Chain model
-
-### 4.1 User-facing order
-
-The guided UI is intentionally human-readable:
+## 3. Certificate flow
 
 ```text
-Root CA
-  |
-Intermediate CA 1
-  |
-Intermediate CA 2
-  |
-Server Certificate
+PEM / DER
+   |
+   v
+DER/X.509 parser
+   |
+   +--> identity / SAN / KU / EKU / policies / constraints / AIA / CRL DP
+   |
+   v
+certificate graph
+   |
+   +--> Subject/Issuer candidate match
+   +--> AKI/SKI compatibility
+   +--> Web Crypto signature verification
+   |
+   v
+all valid paths to supplied trust anchors
+   |
+   +--> selected path (user switchable when multiple paths exist)
+   +--> time sanity
+   +--> RFC constraint subset
+   +--> hostname/SAN
+   +--> bundle-order comparison
+   +--> corrected fullchain.pem
+   +--> diagnostic report
 ```
 
-Intermediate CA 1 is the CA closest to the Root. The last Intermediate CA is closest to the Server Certificate.
+## 4. Path model
 
-### 4.2 Internal representation
+Each certificate is a graph node. A child→issuer edge is considered when Issuer Name matches Subject Name and AKI/SKI does not contradict the relationship. The edge becomes valid only after cryptographic signature verification.
 
-Internally there is no `leaf.parent.parent` assumption.
+Traversal:
 
-Each certificate is a node. A candidate directed edge exists from a child certificate to a possible issuer when:
+- tracks visited certificate IDs to prevent circular relationships from recursing indefinitely;
+- enumerates all supplied-anchor paths;
+- imposes a 64-certificate safety bound for hostile/pathological input;
+- sorts discovered paths deterministically;
+- supports interactive path selection.
 
-- the child's Issuer Name matches the candidate issuer's Subject Name; and
-- if both are available, the child's AKI matches the issuer's SKI.
+The UI's Root → Intermediate(s) → Server fields are a human-friendly input order, not the internal model.
 
-The edge becomes valid only if Web Crypto verifies the child's signature with the issuer public key.
-
-This supports:
-
-- zero intermediates;
-- one intermediate;
-- multiple intermediates;
-- multiple supplied trust anchors;
-- cross-signed intermediates;
-- multiple valid paths.
-
-Path traversal is bounded naturally by the number of supplied certificates and cycle detection, not by a hard-coded certificate-chain length.
-
-## 5. Server bundle model
-
-A certification path and a TLS server bundle have opposite presentation directions.
+## 5. TLS bundle model
 
 Certification path:
 
 ```text
-Root -> Intermediate(s) -> Leaf
+Leaf -> Intermediate nearest leaf -> ... -> Root
 ```
 
-Typical TLS `fullchain.pem`:
+Normal TLS server `fullchain.pem`:
 
 ```text
 Leaf
-Intermediate nearest Leaf
+Intermediate nearest leaf
 ...
-Intermediate nearest Root
+Intermediate nearest root
 ```
 
-The Root CA is normally omitted because the relying party should already possess the trust anchor.
+The Root is normally omitted. Bundle analysis is therefore separate from path validation.
 
-Bundle analysis is therefore deliberately separate from cryptographic path validation.
+## 6. Validation domains
 
-## 6. Validation dimensions
+### Cryptographic path
 
-### 6.1 Cryptographic path
+`chain-validator.js` + `crypto.js`
 
-Implemented in `chain-validator.js` and `crypto.js`.
+- RSA PKCS#1;
+- RSA-PSS when Web Crypto can represent the PSS parameters;
+- ECDSA;
+- Ed25519;
+- explicit unsupported state for algorithms/parameter combinations outside that set.
 
-- issuer-name candidate discovery;
-- AKI/SKI compatibility;
-- signature verification;
-- path discovery to one of the supplied Root trust anchors;
-- multiple-path enumeration.
+### Time sanity
 
-### 6.2 Time sanity
+`time-validation.js`
 
-Implemented in `time-validation.js`.
+- not yet valid;
+- expired;
+- expiry warning thresholds;
+- issuer expires before child;
+- issuer starts after child.
 
-Reports independently:
+Trust-anchor validity remains advisory because platform handling can differ.
 
-```text
-Certificate is not valid yet
-Certificate expired
-Certificate expires soon
-Intermediate/issuer expires before child
-Issuer validity starts after child validity begins
-```
+### X.509 constraints
 
-The supplied Root certificate's validity period is shown as advisory because a trust anchor is external input to RFC 5280 path validation and platform handling of trust-anchor certificate metadata can differ.
+`chain-validator.js`
 
-### 6.3 X.509 constraints
+Implemented:
 
-Current checks:
-
-- leaf must not assert `CA=TRUE`;
-- intermediates must assert `Basic Constraints CA=TRUE`;
-- if CA Key Usage is present, it must include `keyCertSign`;
-- server EKU, when present, must permit `serverAuth` or Any EKU;
-- `pathLenConstraint`;
-- weak SHA-1 certificate signature warnings;
-- unsupported critical-extension detection.
-
-Critical Name Constraints are detected but not yet enforced. A chain containing critical Name Constraints is therefore **indeterminate**, not valid.
-
-### 6.4 Hostname/SAN
-
-Implemented in `hostname.js`.
-
-- DNS SAN exact matching;
-- wildcard matching only for one left-most label;
-- IP SAN matching;
-- Common Name fallback is reported only as legacy behaviour if no SAN exists.
-
-### 6.5 Trust context
-
-The browser can prove:
-
-```text
-Path is valid against Root CA X supplied to this page.
-```
-
-The browser cannot generally prove:
-
-```text
-Windows/macOS/Linux/Firefox/Java on this host trusts Root CA X.
-```
-
-Therefore the result model contains:
-
-```text
-suppliedAnchor: true
-osTrustInspected: false
-```
-
-Platform commands in `#commands` bridge that operational gap without pretending the browser has host-trust visibility.
-
-## 7. Modules
-
-### `public/assets/js/modules/asn1.js`
-
-Small DER reader and primitive decoders.
-
-It performs structural parsing only. It does not implement cryptographic algorithms.
-
-### `pem.js`
-
-- PEM extraction;
-- Base64 conversion;
-- PEM formatting;
-- future private-key type detection.
-
-### `x509-parser.js`
-
-Decodes the certificate structures needed by the UI:
-
-- Subject / Issuer;
-- validity;
-- public-key algorithm and size/curve;
-- signature algorithm;
 - Basic Constraints;
 - Key Usage;
 - EKU;
-- SAN;
-- SKI / AKI;
-- AIA;
-- CRL Distribution Point URI extraction;
-- Certificate Policies.
+- pathLenConstraint;
+- DNS and IPv4 Name Constraints subset;
+- Certificate Policies inventory;
+- common Policy Constraints/Inhibit Any Policy cases;
+- duplicate extensions;
+- empty-Subject/SAN requirement;
+- unknown critical extensions;
+- malformed wildcard SANs;
+- very large SAN warnings.
 
-### `crypto.js`
+Full RFC 5280 policy processing and every GeneralName constraint type remain release-hardening work.
 
-Uses `globalThis.crypto.subtle` for:
+## 7. Private-key architecture
 
-- SHA-1/SHA-256 fingerprints;
-- SPKI SHA-256;
-- RSA PKCS#1 signature verification;
-- RSA-PSS where supported parameters can be represented by Web Crypto;
-- ECDSA;
-- Ed25519 where the browser supports it.
+`private-key.js`
 
-Unsupported algorithms return an explicit unsupported/indeterminate state.
+Supported input containers:
 
-### `chain-validator.js`
+- PKCS#8 `PRIVATE KEY`;
+- RSA PKCS#1 `RSA PRIVATE KEY` (wrapped locally into PKCS#8);
+- EC SEC1 `EC PRIVATE KEY` (wrapped locally into PKCS#8);
+- PBES2-encrypted PKCS#8 `ENCRYPTED PRIVATE KEY`.
 
-- graph construction;
-- signature-edge verification;
-- path enumeration;
-- multiple-path handling;
-- constraint checks;
-- missing-intermediate diagnosis;
-- guided-order and TLS-bundle analysis.
+After Web Crypto import, public JWK parameters are derived from the private CryptoKey, re-imported as a public key and exported as SPKI. Its SHA-256 fingerprint is compared with the certificate/CSR SPKI fingerprint.
 
-### `hostname.js`
+## 8. CSR architecture
 
-Identity matching independent of certificate-path validation.
+`csr.js`
 
-### `time-validation.js`
+Parses PKCS#10 CertificationRequestInfo, Subject, SPKI and extensionRequest attributes. The CSR signature is verified using the CSR's own public key.
 
-Validity and certificate-lifetime sanity checks.
+Optional comparisons reuse the private-key matcher and certificate parser.
 
-### `report.js`
+## 9. Container formats
 
-Builds a plain-text diagnostic report suitable for tickets and operational notes.
+`formats.js`
 
-### `commands.js`
+- PKCS#7 SignedData certificate extraction.
+- PKCS#12 AuthenticatedSafe / SafeBag traversal for Data and modern PBES2 EncryptedData content.
+- CertBag, KeyBag and PKCS8ShroudedKeyBag inventory.
 
-Static, reviewable trust-store and OpenSSL command reference.
+PKCS#12 MacData verification and legacy PBE algorithms are deliberately not claimed yet.
 
-### `app.js`
+## 10. Revocation
 
-DOM controller only. Cryptographic/path logic remains in testable modules.
+`revocation.js`
 
-## 8. Security boundaries
+CRL:
 
-### Network
+- issuer, update times and revoked serials;
+- CRL signature verification;
+- optional target-certificate lookup.
 
-The CSP sets:
+OCSP:
+
+- OCSPResponse / BasicOCSPResponse parsing;
+- responder metadata and SingleResponse statuses;
+- response signature verification;
+- basic delegated-responder OCSP Signing EKU check.
+
+Imported evidence avoids any runtime network dependency.
+
+## 11. Key modules
 
 ```text
-connect-src 'none'
+asn1.js              strict DER reader/primitive decoders
+der-encode.js        small DER encoder for local container wrapping
+pem.js               PEM extraction/formatting
+x509-parser.js       X.509 structural parser
+crypto.js            Web Crypto verification/fingerprints
+chain-validator.js   graph/path/constraint/bundle logic
+hostname.js          DNS/IP identity and wildcard syntax
+private-key.js       private-key import/decryption/SPKI matching
+csr.js               PKCS#10 parsing/verification/comparison
+formats.js           PKCS#7 and PKCS#12
+revocation.js        CRL and OCSP
+report.js            plaintext diagnostic report
+commands.js          static command reference
+app.js               routes, state and rendering
 ```
 
-The application therefore has no normal runtime network channel.
+## 12. Testing
 
-AIA/CRL URIs are parsed and displayed but not automatically fetched.
+Core CI:
 
-### Browser storage
+```text
+fixture generation (OpenSSL)
+        |
+syntax checks
+        |
+32+ unit tests
+        |
+OpenSSL differential verification
+        |
+static security assertions
+```
 
-Certificate material is not deliberately persisted. Private-key functionality, when added, must not use Web Storage, IndexedDB, cookies or caching APIs for supplied key material.
-
-### Rendering untrusted certificate text
-
-Certificate Subject, Issuer, SAN and extension values are attacker-controlled input. UI rendering escapes values before insertion into HTML.
-
-## 9. Testing
-
-Test-only PKI fixtures are generated by `scripts/generate-test-pki.sh` using OpenSSL.
-
-Coverage currently includes:
-
-- four-level chain;
-- two intermediates;
-- reversed intermediate input order;
-- missing immediate intermediate;
-- missing higher intermediate;
-- leaf-first server bundle;
-- Root incorrectly included in server bundle;
-- `pathLenConstraint` failure;
-- cross-signed intermediate with two valid paths;
-- DNS SAN;
-- wildcard SAN;
-- IP SAN;
-- expiry / not-yet-valid;
-- issuer expires before child.
-
-Browser-level Chromium/Firefox/WebKit regression testing is a planned CI expansion.
-
-## 10. Static deployment
-
-The deployable directory is `/public/`.
-
-No server-side runtime is required.
-
-GitHub Pages deploys the directory only after CI passes.
-
-## 11. Pre-1.0 hardening requirement
-
-X.509 parsing is complex. Before declaring the tool production-grade, the structural parser/validator should be cross-tested against a mature X.509 implementation such as PKI.js / Peculiar X.509 and against OpenSSL-generated edge cases.
-
-The alpha deliberately avoids making a universal RFC 5280 conformance claim.
+Browser CI runs Playwright against Chromium, Firefox and WebKit plus a mobile Chromium viewport. GitHub Pages deployment depends on both test groups.

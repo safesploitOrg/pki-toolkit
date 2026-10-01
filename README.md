@@ -1,168 +1,123 @@
-# Certificate Tool
+# PKI Toolkit
 
-Browser-only X.509 certificate-chain analysis and PKI troubleshooting for homelabs, labs and static GitHub Pages hosting.
+A static, browser-only PKI troubleshooting workbench for X.509 certificates, private keys, CSRs, certificate containers and revocation evidence.
 
-> **Status:** `v0.1.0-alpha.2` — the core certificate-analysis workflow is implemented and under hardening. The core parser/validator is intentionally conservative and reports unsupported critical semantics as indeterminate rather than claiming success.
+The application is designed for homelab/internal-infrastructure use and for static hosting on GitHub Pages. Certificate, key and password material is processed locally in the browser; the runtime has no backend, telemetry, analytics or network API.
 
-## Goals
+Repository: https://github.com/safesploitOrg/pki-toolkit
 
-- Run entirely in HTML/CSS/JavaScript.
-- Work from a static web host such as GitHub Pages.
-- Never upload certificate or private-key material.
-- Explain *why* a chain succeeds or fails.
-- Distinguish cryptographic path validation from deployment bundle order and host trust.
-- Support arbitrary practical chain depth rather than assuming exactly one intermediate.
+## Current capabilities
 
-## Current certificate workflow
+### Certificate analyser (`#certificate`)
 
-The guided UI starts with:
+- Root CA + arbitrary practical Intermediate CA depth + server/leaf certificate.
+- Graph-based issuer discovery rather than a fixed `leaf.parent.parent` model.
+- Cross-signed and multiple-valid-path discovery with interactive path selection.
+- Web Crypto signature verification for RSA PKCS#1, supported RSA-PSS parameters, ECDSA and Ed25519.
+- Separate results for cryptographic path, bundle order, hostname/SAN, time, X.509 constraints and trust context.
+- TLS bundle-order validation and corrected `fullchain.pem` generation.
+- DNS/IP SAN validation and strict single-label wildcard handling.
+- Expired, not-yet-valid and expiry-soon checks plus issuer/child lifetime sanity.
+- Basic Constraints, KU, EKU and `pathLenConstraint` checks.
+- DNS/IPv4 Name Constraints evaluation for the supported subset.
+- Certificate Policies metadata plus basic Policy Constraints / Inhibit Any Policy enforcement.
+- Missing-intermediate diagnosis with AIA CA Issuers hints (never fetched automatically).
+- SHA-256/SHA-1 certificate fingerprints and SHA-256 SPKI fingerprints.
+- Copyable/downloadable diagnostic report.
+- Pathology checks for duplicate certificates, duplicate serials, malformed wildcard SANs, duplicate extensions, unknown critical extensions, empty-Subject rules, excessive depth and very large SAN lists.
+- Self-issued vs self-signed distinction.
 
-1. Root CA
-2. Intermediate CA 1 (optional)
-3. Server Certificate
+### Private-key validation (`#privatekey`)
 
-Use **Add Intermediate CA** for deeper hierarchies. Intermediates are entered in trust-path order:
+- Certificate ↔ private-key public-key matching.
+- RSA, ECDSA and Ed25519.
+- PKCS#8, RSA PKCS#1 and EC SEC1 PEM key containers.
+- Encrypted PKCS#8 using PBES2 + PBKDF2 + AES-CBC.
+- SPKI SHA-256 comparison.
+- Password field cleared after use; explicit secret-material reset control.
 
-```text
-Root CA -> Intermediate CA 1 -> Intermediate CA 2 -> Server Certificate
-```
+### CSR tooling (`#csr`)
 
-The generated TLS `fullchain.pem` uses server-bundle order:
+- PKCS#10 parsing and CSR signature verification.
+- Subject, public key, requested SANs and requested extensions.
+- CSR ↔ private-key comparison.
+- CSR ↔ issued-certificate comparison including Subject, SPKI and SAN differences.
 
-```text
-Server Certificate
-Intermediate CA 2
-Intermediate CA 1
-```
+### Certificate containers (`#formats`)
 
-The Root CA is intentionally omitted from the generated server bundle.
+- Raw DER certificate import through certificate file inputs.
+- PKCS#7/P7B certificate extraction.
+- PKCS#12/PFX inspection for modern PBES2/PBKDF2/AES-CBC containers.
+- Certificate and private-key inventory without exporting secret keys.
 
-## Implemented checks
+### Revocation (`#revocation`)
 
-- PEM and DER certificate input via paste/file selection.
-- Multiple Root CA trust anchors for alternative/cross-signed path testing.
-- Arbitrary number of intermediate CA fields.
-- Graph-based certificate path discovery.
-- Cryptographic signature verification using the browser Web Crypto API.
-- Guided intermediate-order analysis.
-- Existing `fullchain.pem` order analysis.
-- Corrected `fullchain.pem` generation, copy and download.
-- Hostname/IP validation against Subject Alternative Name.
-- Wildcard DNS matching for one left-most label.
-- Certificate validity checks:
-  - not valid yet;
-  - expired;
-  - expiry warnings;
-  - issuer/intermediate expires before child;
-  - issuer starts after child.
-- X.509 checks:
-  - Basic Constraints;
-  - Key Usage;
-  - Extended Key Usage / TLS serverAuth;
-  - `pathLenConstraint`;
-  - unsupported critical-extension detection.
-- Missing intermediate diagnosis, including CA Issuers AIA locations where present.
-- SHA-256 and SHA-1 certificate fingerprints.
-- SHA-256 SPKI fingerprint.
-- Copyable and downloadable diagnostic report.
-- Explicit supplied-root vs OS/browser-trust panel and Root SHA-256 fingerprint.
-- Root trust-store commands for common operating systems, with copy controls.
-- OpenSSL troubleshooting commands.
-- Cross-signed / multiple-path architecture and test fixtures.
+- X.509 CRL parsing, signature verification, freshness checks and serial lookup.
+- OCSP response parsing, signature verification and SingleResponse status lookup.
+- Basic delegated OCSP-signer EKU check.
+- No automatic OCSP/CRL/AIA network requests.
 
-## Trust semantics
+### Commands (`#commands`)
 
-A successful result means:
+- Trust-store install/verify/remove examples for RHEL-family Linux, Debian/Ubuntu, macOS, Windows and Java.
+- OpenSSL helpers for certificates, chains, CSRs, keys, PKCS#7, PKCS#12, CRLs and OCSP responses.
 
-> The supplied certificate path is cryptographically valid against a Root CA supplied to the application, subject to the checks implemented by this version.
+## Development
 
-It **does not** mean:
+Requirements:
 
-> The computer, browser, container, JVM or remote client currently trusts that Root CA.
-
-A normal static browser application cannot enumerate the host operating-system/browser trust store. The UI therefore reports OS/browser trust as **not inspected** and provides platform-specific commands under `#commands`.
-
-## Private-key roadmap
-
-`#privatekey` is present as a design surface only. When implemented it will validate certificate/private-key public-key matching without sending key material anywhere.
-
-Private keys must never be persisted to:
-
-- localStorage;
-- sessionStorage;
-- IndexedDB;
-- cookies;
-- diagnostic reports;
-- telemetry/logging.
-
-See [SECURITY.md](SECURITY.md).
-
-## Run locally
-
-No runtime dependencies are required for the current alpha.
+- Node.js 20+
+- OpenSSL 3.x for fixture generation/differential checks
+- Python 3 for the simple local static server
 
 ```bash
+npm ci
+npm run fixtures
+npm run check
 npm run serve
 ```
 
-Then open:
+Open `http://localhost:4173`.
+
+`npm run check` performs JavaScript syntax checks, the Node unit suite and OpenSSL differential checks.
+
+Test certificates, CRLs, CSRs, private keys and PKCS#12 files are disposable fixtures generated by `npm run fixtures`; generated fixture material is intentionally ignored by Git and is not shipped as repository source.
+
+## Browser E2E
+
+GitHub Actions installs a pinned Playwright test runner and runs the application in Chromium, Firefox and WebKit, plus a mobile Chromium viewport. Pages deployment depends on both the core test job and browser E2E job.
+
+The Playwright dependency is intentionally installed only in CI, so the production/static application retains zero runtime dependencies.
+
+## GitHub Pages
+
+`public/` is the complete deployable site. `.github/workflows/pages.yml` publishes only that directory after validation succeeds.
+
+## Security model
+
+The browser runtime intentionally uses:
 
 ```text
-http://localhost:4173
+connect-src 'none'
 ```
 
-## Tests
+Private keys/passwords are not written to localStorage, sessionStorage, IndexedDB, cookies, URLs, reports or telemetry. See [`SECURITY.md`](SECURITY.md) for the detailed model and remaining limitations.
 
-Generate the test-only PKI fixtures:
+## Trust terminology
 
-```bash
-npm run fixtures
-```
+A successful path means:
 
-Run syntax checks and unit tests:
+> The supplied certificates form a cryptographically valid path to the Root CA supplied to this page.
 
-```bash
-npm run check
-```
+It does **not** mean:
 
-The fixtures include:
+> This computer/browser/JVM/application trusts that Root CA.
 
-- Root -> Intermediate 1 -> Intermediate 2 -> server;
-- valid leaf-first `fullchain.pem`;
-- a cross-signed intermediate with two valid Root paths.
+Normal browser JavaScript cannot reliably enumerate native trust stores, so host trust is deliberately reported as **not inspected**.
 
-## Repository layout
+## Project documentation
 
-```text
-certificate-tool/
-├── .github/workflows/
-├── public/
-│   ├── index.html
-│   └── assets/
-│       ├── css/
-│       └── js/
-│           └── modules/
-├── scripts/
-├── tests/
-│   ├── browser/
-│   ├── fixtures/
-│   └── unit/
-├── ARCHITECTURE.md
-├── CHANGELOG.md
-├── ROADMAP.md
-├── SECURITY.md
-├── README.md
-├── package.json
-└── package-lock.json
-```
-
-## Known alpha limitations
-
-- The built-in DER/X.509 decoder is deliberately narrow and must be hardened/cross-validated before a `1.0` security claim.
-- Revocation is not validated yet: CRL and OCSP locations may be displayed but are not fetched.
-- Critical Name Constraints are detected but not enforced yet; the result becomes indeterminate rather than passing.
-- DSA and some uncommon/legacy signature algorithms are not implemented.
-- OS/browser trust stores are not inspected.
-- Private-key and CSR workflows are roadmap items.
-
-See [ROADMAP.md](ROADMAP.md) for planned work.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- [`SECURITY.md`](SECURITY.md)
+- [`ROADMAP.md`](ROADMAP.md)
+- [`CHANGELOG.md`](CHANGELOG.md)

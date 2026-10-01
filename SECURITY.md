@@ -1,69 +1,89 @@
 # Security
 
-## Security posture
+## Security objective
 
-Certificate Tool is designed as a static, browser-only utility. Certificate analysis should not require sending certificate material to a remote service, and future private-key analysis must never require uploading key material.
+PKI Toolkit is intended to be safe to use with internal certificate material and, where necessary, private keys by keeping all processing inside the current browser tab.
 
-## Runtime network policy
+## Runtime security boundary
 
-The application sets a restrictive Content Security Policy including:
+The deployed application is static HTML/CSS/JavaScript from `public/`.
 
-```text
-connect-src 'none'
-script-src 'self'
-style-src 'self'
-object-src 'none'
-base-uri 'none'
-```
+It intentionally has:
 
-No analytics, telemetry, remote fonts or CDN JavaScript are required.
+- no backend;
+- no analytics or telemetry;
+- no CDN-hosted runtime JavaScript;
+- no fetch/XHR/WebSocket/EventSource calls;
+- CSP `connect-src 'none'`;
+- no localStorage/sessionStorage/IndexedDB use;
+- no private-key data in URLs or diagnostic reports.
 
-## Certificate material
+The CI security assertion rejects newly introduced runtime network APIs and remote script/style dependencies.
 
-Certificates are public by design, but certificate metadata can still disclose internal hostnames, organisations and infrastructure structure.
+## Private-key and password handling
 
-The application therefore:
+Private-key operations are deliberately ephemeral:
 
-- performs analysis locally;
-- does not auto-fetch AIA or CRL URLs;
-- does not send certificate content to a backend;
-- does not intentionally persist supplied certificates.
+1. PEM text is read from the form control.
+2. The key is parsed/imported into Web Crypto.
+3. A public SPKI representation is derived and compared with the certificate/CSR SPKI.
+4. Password controls are cleared after an operation.
+5. The explicit Clear action clears key/password form controls and result references.
 
-## Private-key policy
+No private key is exported by the UI or included in reports.
 
-Private-key support is not implemented in `v0.1.0-alpha.2`. When implemented, all of the following are mandatory:
+JavaScript and garbage-collected browser memory cannot guarantee immediate physical zeroisation of every temporary buffer. The security claim is therefore **no deliberate persistence or transmission**, not guaranteed forensic memory erasure.
 
-1. Private keys remain in browser memory only for the operation.
-2. No localStorage.
-3. No sessionStorage.
-4. No IndexedDB.
-5. No cookies.
-6. No Service Worker cache containing supplied key material.
-7. No analytics or telemetry containing key material or derived private-key values.
-8. No inclusion of private keys in error messages or diagnostic reports.
-9. No automatic clipboard writes.
-10. Clear application references after processing or user-requested clearing.
-11. Prefer non-extractable Web Crypto key objects after import where technically possible.
-12. Encrypted private keys must never have their passphrases persisted.
+## Encrypted keys / PFX
 
-## Trust boundary
+The current encrypted-key/PFX compatibility targets modern PBES2 + PBKDF2 + AES-CBC structures. Unsupported/legacy algorithms fail explicitly.
 
-A result stating that a chain validates against a supplied Root CA does **not** assert that the local operating system, browser, JVM or another client trusts that Root CA.
+PKCS#12 `MacData` presence is detected, but this alpha does not yet claim to verify the PKCS#12 integrity MAC. This limitation is shown in the Formats UI and tracked in `ROADMAP.md`.
 
-The application intentionally reports host trust as uninspected.
+## Trust semantics
+
+The certificate analyser can prove that a supplied path cryptographically terminates at a supplied trust anchor. It cannot enumerate native operating-system, browser, JVM or application trust stores.
+
+Consequently, the UI reports host trust as **not inspected** rather than inferring it.
+
+## Network-assisted PKI features
+
+AIA, OCSP and CRL URLs embedded in certificates are displayed but never automatically contacted. This avoids:
+
+- leaking internal certificate identifiers/hostnames;
+- browser CORS dependency;
+- attacker-controlled certificate URLs triggering network activity;
+- weakening `connect-src 'none'`.
+
+Revocation evidence is imported explicitly by the user.
+
+## Parsing and untrusted input
+
+Certificate, CSR, CRL, OCSP, PKCS#7 and PKCS#12 data are untrusted input.
+
+Defences include:
+
+- strict DER definite-length parsing;
+- rejection of truncated/trailing structures where appropriate;
+- cycle-safe chain traversal;
+- a 64-certificate path/input safety cap;
+- very-large-SAN warning/indeterminate thresholds;
+- duplicate-extension detection;
+- unknown critical-extension handling as indeterminate;
+- explicit unsupported-algorithm states rather than fallbacks.
+
+All certificate-derived strings inserted into HTML are escaped by the UI.
 
 ## Cryptography
 
-Cryptographic digest and signature verification operations use the Web Crypto API. The project does not implement RSA, ECDSA, EdDSA or hash primitives itself.
+Cryptographic primitives are delegated to the browser/Node Web Crypto implementation. The project parses ASN.1/X.509 structures but does not implement hashes, RSA, ECDSA, Ed25519, AES or PBKDF2 primitives itself.
 
-The alpha contains a purpose-built DER/X.509 structural decoder. Because X.509 parsing is security-sensitive, pre-1.0 hardening includes differential testing against established PKI libraries and additional malformed-certificate fuzzing.
+OpenSSL-generated fixtures and differential verification are used in CI to reduce the risk of accepting chains OpenSSL rejects or rejecting standard signatures unexpectedly.
 
-## Test keys
+## Reporting vulnerabilities
 
-Certificate fixtures under `tests/fixtures/` are generated from ephemeral, test-only keys. The private keys are created in a temporary directory by `scripts/generate-test-pki.sh` and are not copied into the repository.
+Do not include production private keys, passwords or other secret key material in a public GitHub issue. Reproduce with disposable test certificates wherever possible.
 
-They must never be used outside testing.
+## Test material
 
-## Reporting a security issue
-
-Do not publish sensitive certificate/private-key material in a public issue. Use the repository owner's private security reporting channel when one is configured.
+The automated test PKI is generated locally by `scripts/generate-test-pki.sh`. Generated private keys, PKCS#12 containers and certificates under `tests/fixtures/` are intentionally Git-ignored and should not be committed. They are disposable test-only material and are regenerated in CI.
