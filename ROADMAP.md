@@ -1,8 +1,8 @@
 # Roadmap
 
-## Current release line — v0.4 alpha
+## Current release line — v0.5 alpha
 
-The original v0.1–v0.4 feature roadmap is now substantially implemented. Remaining work is primarily standards-depth, compatibility and release hardening rather than missing top-level product surfaces.
+The original v0.1-v0.4 product roadmap is substantially implemented. `v0.5` is a standards-depth, compatibility and release-hardening line rather than another large UI expansion.
 
 ## v0.1 — Certificate analyser
 
@@ -11,7 +11,7 @@ The original v0.1–v0.4 feature roadmap is now substantially implemented. Remai
 - [x] Graph-based path construction and cycle avoidance.
 - [x] Cross-signed / multiple-path discovery.
 - [x] Interactive alternate-path selection.
-- [x] RSA PKCS#1, RSA-PSS subset, ECDSA and Ed25519 signature verification.
+- [x] RSA PKCS#1, supported RSA-PSS parameters, ECDSA and Ed25519 signature verification.
 - [x] Bundle-order analysis and corrected `fullchain.pem`.
 - [x] Hostname/SAN validation.
 - [x] Time sanity and issuer/child lifetime checks.
@@ -49,8 +49,7 @@ The original v0.1–v0.4 feature roadmap is now substantially implemented. Remai
 
 ## v0.4 — Advanced path and revocation analysis
 
-- [x] DNS Name Constraints evaluation.
-- [x] IPv4 Name Constraints evaluation.
+- [x] DNS / IPv4 Name Constraints evaluation.
 - [x] Certificate Policies inventory.
 - [x] Basic `requireExplicitPolicy=0` and `inhibitAnyPolicy=0` checks.
 - [x] CRL import, signature verification, freshness and serial lookup.
@@ -58,26 +57,35 @@ The original v0.1–v0.4 feature roadmap is now substantially implemented. Remai
 - [x] Alternate/cross-signed path selection in the UI.
 - [x] Keep automatic AIA/OCSP/CRL retrieval disabled by default.
 
-## Remaining before a stable v1.0
+## v0.5 — Standards and release hardening
 
 ### RFC 5280 depth
 
-- [ ] Full Name Constraints coverage for `directoryName`, `rfc822Name`, URI constraints, IPv6 constraints and non-default GeneralSubtree minimum/maximum values.
-- [ ] Full RFC 5280 policy-tree processing, including policy mappings and multi-CA policy state rather than only the implemented common constraints.
-- [ ] More exhaustive trust-anchor constraint modelling; supplied Root certificate metadata remains advisory where platform semantics vary.
+- [x] Add `rfc822Name`, URI, IPv6 and `directoryName` Name Constraints handling.
+- [x] Explicitly reject non-default GeneralSubtree `minimum`/`maximum` values under the RFC 5280 Internet profile rather than silently ignoring them.
+- [x] Parse PolicyMappings and maintain explicit-policy / inhibit-mapping / inhibit-any-policy state through common multi-CA paths.
+- [x] Add optional strict supplied-root metadata mode for supported Root Basic Constraints, KU, Name Constraints and policy state.
+- [ ] Complete the full RFC 5280 policy-tree algorithm for exotic mapping/intersection/qualifier topologies and verify behaviour against a standards corpus.
+- [ ] Add richer models for platform-specific trust-anchor behaviour where they can be described without pretending browser JavaScript can inspect the real host trust store.
 
 ### PKCS#12 compatibility
 
-- [ ] Verify PKCS#12 `MacData` rather than only reporting its presence.
-- [ ] Legacy PKCS#12 PBE compatibility where it can be implemented without weakening the local security model.
-- [ ] Broader SafeBag/attribute presentation (friendlyName/localKeyId).
+- [x] Verify PKCS#12 `MacData` for SHA-1/SHA-256/SHA-384/SHA-512.
+- [x] Present SafeBag `friendlyName` / `localKeyId` attributes.
+- [x] Detect legacy PKCS#12 PBE OIDs and surface them without attempting unsafe/unreviewed fallback crypto.
+- [ ] Legacy PKCS#12 PBE decryption compatibility. Do not implement RC2/3DES primitives in-house; only add this if a reviewed local dependency or browser capability can preserve the current security model.
 
 ### Revocation depth
 
-- [ ] Delta CRLs and indirect CRLs.
-- [ ] CRL Issuing Distribution Point and reason-mask processing.
-- [ ] Stronger delegated OCSP responder chain/authorisation validation.
-- [ ] OCSP nonce/extension presentation and producedAt/clock-skew policy controls.
+- [x] Base + delta CRL combination and `removeFromCRL` handling.
+- [x] Indirect CRL entry-issuer handling.
+- [x] Issuing Distribution Point CA/end-entity scope and reason-mask handling.
+- [x] CRL number, delta indicator, AKI and Freshest CRL metadata parsing.
+- [x] Delegated OCSP responder authorisation: responder selection, direct issuer signature, OCSPSigning EKU and responder-time validation.
+- [x] OCSP CertID issuer-name/key-hash validation.
+- [x] OCSP nonce presentation/comparison and `producedAt` / clock-skew / max-age controls.
+- [ ] Complete CRL distribution-point-name matching and the less common indirect/delta edge cases against an external revocation corpus.
+- [ ] Add deeper OCSP extension policy where a concrete interoperability need exists (for example service-locator/archive-cutoff semantics).
 
 ### Parser hardening
 
@@ -86,17 +94,22 @@ The original v0.1–v0.4 feature roadmap is now substantially implemented. Remai
 - [x] Circular issuer tests.
 - [x] Excessive-depth safety cap.
 - [x] Very-large-SAN warnings/safety threshold.
-- [ ] Larger external malformed-certificate corpus/fuzzing.
-- [ ] Differential parsing against a second JavaScript X.509 implementation such as PKI.js in addition to the existing OpenSSL differential suite.
+- [x] Deterministic mutation fuzz smoke over generated certificate material.
+- [x] PKI.js/asn1js differential parser job added to CI with pinned test-only versions.
+- [x] Pinned C2SP `x509-limbo` parser-corpus smoke added to CI. It remains informational while alpha so corpus incompatibilities can be triaged rather than silently disabling coverage.
+- [ ] Promote selected x509-limbo expectations from parser-only smoke to semantic path-validation comparisons as the policy/name-constraint engine matures.
 
-### Browser/release hardening
+### Browser / release hardening
 
 - [x] Multi-engine Playwright CI configured.
 - [x] Desktop + mobile smoke coverage.
 - [x] Local-only CSP assertions.
-- [ ] Add an automated accessibility scanner (for example axe) to CI; current pass is structural/manual plus browser smoke assertions.
-- [ ] Verify the supplied favicon's third-party licence/attribution requirements before a public release if applicable.
+- [x] axe accessibility scans wired into browser CI for primary routes (serious/critical violations are gating).
+- [x] Favicon attribution path documented and public footer attribution added for the supplied Icons8 asset.
+- [x] Add a repeatable local release-candidate smoke script and release checklist.
+- [ ] Run the first remote CI execution of the new PKI.js/axe/x509-limbo jobs and fix any environment-specific failures.
 - [ ] Final release-candidate testing against representative real-world public and private PKIs.
+- [ ] Promote from alpha only after the release checklist is complete and known parser/policy limitations are clearly documented.
 
 ## Later — optional server workflow
 

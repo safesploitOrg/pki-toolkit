@@ -1,4 +1,14 @@
-import { TAG_CLASS, decodeOid, readChildren, readDer, toUint8 } from './asn1.js';
+import {
+  TAG_CLASS,
+  bytesToHex,
+  decodeInteger,
+  decodeOid,
+  decodeString,
+  equalBytes,
+  readChildren,
+  readDer,
+  toUint8,
+} from './asn1.js';
 import { derOctetString, derSequence } from './der-encode.js';
 import { formatPem, parsePemBlocks } from './pem.js';
 import { parseCertificate } from './x509-parser.js';
@@ -13,12 +23,36 @@ const OIDS = Object.freeze({
   KEY_BAG: '1.2.840.113549.1.12.10.1.1',
   SHROUDED_KEY_BAG: '1.2.840.113549.1.12.10.1.2',
   X509_CERT_TYPE: '1.2.840.113549.1.9.22.1',
+  FRIENDLY_NAME: '1.2.840.113549.1.9.20',
+  LOCAL_KEY_ID: '1.2.840.113549.1.9.21',
+  PBES2: '1.2.840.113549.1.5.13',
+  SHA1: '1.3.14.3.2.26',
+  SHA256: '2.16.840.1.101.3.4.2.1',
+  SHA384: '2.16.840.1.101.3.4.2.2',
+  SHA512: '2.16.840.1.101.3.4.2.3',
 });
+
+const MAC_DIGESTS = Object.freeze({
+  [OIDS.SHA1]: { hash: 'SHA-1', u: 20, v: 64 },
+  [OIDS.SHA256]: { hash: 'SHA-256', u: 32, v: 64 },
+  [OIDS.SHA384]: { hash: 'SHA-384', u: 48, v: 128 },
+  [OIDS.SHA512]: { hash: 'SHA-512', u: 64, v: 128 },
+});
+
+function subtle() {
+  if (!globalThis.crypto?.subtle) throw new Error('Web Crypto API is not available');
+  return globalThis.crypto.subtle;
+}
 
 function contentInfoParts(node) {
   const parts = readChildren(node);
   if (!parts.length) throw new Error('ContentInfo is empty');
   return { oid: decodeOid(parts[0]), content: parts[1] || null };
+}
+
+function algorithmOid(node) {
+  const parts = readChildren(node);
+  return parts[0] ? decodeOid(parts[0]) : null;
 }
 
 export function extractPkcs7CertificateDer(input) {
@@ -59,6 +93,30 @@ function unwrapExplicit(node) {
   return children[0] || null;
 }
 
+function parseBagAttributes(node) {
+  const attributes = { friendlyName: null, localKeyId: null, raw: [] };
+  if (!node || node.tagClass !== TAG_CLASS.UNIVERSAL || node.tagNumber !== 17) return attributes;
+  for (const attr of readChildren(node)) {
+    const parts = readChildren(attr);
+    if (parts.length < 2) continue;
+    const oid = decodeOid(parts[0]);
+    const valueSet = parts[1];
+    const values = valueSet?.constructed ? readChildren(valueSet) : [];
+    const first = values[0] || null;
+    if (oid === OIDS.FRIENDLY_NAME && first) {
+      attributes.friendlyName = decodeString(first);
+    } else if (oid === OIDS.LOCAL_KEY_ID && first?.tagClass === TAG_CLASS.UNIVERSAL && first.tagNumber === 4) {
+      attributes.localKeyId = bytesToHex(first.value, ':');
+    }
+    attributes.raw.push({ oid, count: values.length });
+  }
+  return attributes;
+}
+
+function bagRecord(bagId, attributes, details = {}) {
+  return { bagId, attributes, ...details };
+}
+
 async function parseSafeContents(bytes, password, output) {
   const root = readDer(bytes);
   const bags = readChildren(root);
@@ -67,6 +125,7 @@ async function parseSafeContents(bytes, password, output) {
     if (parts.length < 2) continue;
     const bagId = decodeOid(parts[0]);
     const value = unwrapExplicit(parts[1]);
+    const attributes = parseBagAttributes(parts[2]);
     if (!value) continue;
 
     if (bagId === OIDS.CERT_BAG) {
@@ -78,21 +137,42 @@ async function parseSafeContents(bytes, password, output) {
       const cert = parseCertificate(certDer, formatPem('CERTIFICATE', certDer));
       await decorateFingerprints(cert);
       cert.sourceId = cert.fingerprints.sha256;
+      cert.pkcs12Attributes = attributes;
       output.certificates.push(cert);
+      output.bags.push(bagRecord(bagId, attributes, { type: 'certificate', subject: cert.subject.display }));
       continue;
     }
 
     if (bagId === OIDS.KEY_BAG) {
       const info = decodePkcs8PrivateKey(value.encoded, 'PRIVATE KEY');
-      output.keys.push({ family: info.family, curve: info.curve || null, encrypted: false });
+      const key = { family: info.family, curve: info.curve || null, encrypted: false, attributes };
+      output.keys.push(key);
+      output.bags.push(bagRecord(bagId, attributes, { type: 'private-key', family: info.family }));
       continue;
     }
 
     if (bagId === OIDS.SHROUDED_KEY_BAG) {
+      const encryptedPrivateKeyParts = readChildren(value);
+      const protectionOid = encryptedPrivateKeyParts[0] ? algorithmOid(encryptedPrivateKeyParts[0]) : null;
+      if (protectionOid && protectionOid !== OIDS.PBES2) {
+        output.unsupportedAlgorithms.push(protectionOid);
+        output.bags.push(bagRecord(bagId, attributes, {
+          type: 'shrouded-private-key',
+          family: null,
+          protectionOid,
+          supported: false,
+        }));
+        continue;
+      }
       const clear = await decryptPkcs8(value.encoded, password);
       const info = decodePkcs8PrivateKey(clear, 'PRIVATE KEY');
-      output.keys.push({ family: info.family, curve: info.curve || null, encrypted: true });
+      const key = { family: info.family, curve: info.curve || null, encrypted: true, attributes };
+      output.keys.push(key);
+      output.bags.push(bagRecord(bagId, attributes, { type: 'shrouded-private-key', family: info.family, protectionOid: protectionOid || OIDS.PBES2, supported: true }));
+      continue;
     }
+
+    output.bags.push(bagRecord(bagId, attributes, { type: 'unsupported' }));
   }
 }
 
@@ -119,6 +199,8 @@ async function parseAuthenticatedSafe(input, password, output) {
       if (!algorithmNode || !encryptedContent || encryptedContent.tagClass !== TAG_CLASS.CONTEXT || encryptedContent.tagNumber !== 0) {
         throw new Error('Unsupported PKCS#12 EncryptedData layout');
       }
+      const encryptionOid = algorithmOid(algorithmNode);
+      if (encryptionOid !== OIDS.PBES2) output.unsupportedAlgorithms.push(encryptionOid || 'unknown');
       let encryptedBytes = encryptedContent.value.slice();
       if (encryptedContent.constructed) {
         const chunks = readChildren(encryptedContent).map((part) => part.value);
@@ -127,6 +209,10 @@ async function parseAuthenticatedSafe(input, password, output) {
         let offset = 0;
         for (const chunk of chunks) { encryptedBytes.set(chunk, offset); offset += chunk.length; }
       }
+      if (encryptionOid !== OIDS.PBES2) {
+        output.unsupportedContentTypes.push(`encrypted-safe:${encryptionOid || 'unknown'}`);
+        continue;
+      }
       const clear = await decryptEncryptedContent(algorithmNode, encryptedBytes, password);
       await parseSafeContents(clear, password, output);
       continue;
@@ -134,6 +220,122 @@ async function parseAuthenticatedSafe(input, password, output) {
 
     output.unsupportedContentTypes.push(ci.oid);
   }
+}
+
+function pkcs12PasswordBytes(password) {
+  const text = String(password ?? '');
+  const out = new Uint8Array((text.length + 1) * 2);
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    out[i * 2] = (code >> 8) & 0xff;
+    out[i * 2 + 1] = code & 0xff;
+  }
+  return out; // trailing two NUL bytes are already zero-filled
+}
+
+function repeatToMultiple(input, blockSize) {
+  const bytes = toUint8(input);
+  if (!bytes.length) return new Uint8Array();
+  const length = blockSize * Math.ceil(bytes.length / blockSize);
+  const out = new Uint8Array(length);
+  for (let i = 0; i < length; i += 1) out[i] = bytes[i % bytes.length];
+  return out;
+}
+
+async function digest(hash, bytes) {
+  return new Uint8Array(await subtle().digest(hash, toUint8(bytes)));
+}
+
+function concatBytes(...arrays) {
+  const total = arrays.reduce((sum, item) => sum + item.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const item of arrays) { out.set(item, offset); offset += item.length; }
+  return out;
+}
+
+function adjustPkcs12Block(buffer, offset, block) {
+  let carry = 1;
+  for (let i = block.length - 1; i >= 0; i -= 1) {
+    const sum = buffer[offset + i] + block[i] + carry;
+    buffer[offset + i] = sum & 0xff;
+    carry = sum >>> 8;
+  }
+}
+
+/** RFC 7292 Appendix B PKCS#12 password-based key derivation. */
+export async function derivePkcs12Key({ hash, u, v, id, password, salt, iterations, length }) {
+  if (!Number.isInteger(iterations) || iterations < 1) throw new Error('Invalid PKCS#12 MAC iteration count');
+  const D = new Uint8Array(v).fill(id);
+  const S = repeatToMultiple(salt, v);
+  const P = repeatToMultiple(pkcs12PasswordBytes(password), v);
+  let I = concatBytes(S, P);
+  const blocks = Math.ceil(length / u);
+  const output = new Uint8Array(blocks * u);
+
+  for (let i = 0; i < blocks; i += 1) {
+    let A = await digest(hash, concatBytes(D, I));
+    for (let round = 1; round < iterations; round += 1) A = await digest(hash, A);
+    output.set(A, i * u);
+    if (I.length) {
+      const B = new Uint8Array(v);
+      for (let j = 0; j < v; j += 1) B[j] = A[j % A.length];
+      for (let offset = 0; offset < I.length; offset += v) adjustPkcs12Block(I, offset, B);
+    }
+  }
+  return output.slice(0, length);
+}
+
+function parseMacData(node) {
+  const parts = readChildren(node);
+  if (parts.length < 2) throw new Error('Invalid PKCS#12 MacData');
+  const digestInfo = readChildren(parts[0]);
+  if (digestInfo.length < 2) throw new Error('Invalid PKCS#12 DigestInfo');
+  const digestAlg = readChildren(digestInfo[0]);
+  const digestOid = decodeOid(digestAlg[0]);
+  const digestBytes = digestInfo[1].value.slice();
+  const salt = parts[1].value.slice();
+  const iterations = parts[2] ? Number(decodeInteger(parts[2])) : 1;
+  return { digestOid, digestBytes, salt, iterations };
+}
+
+export async function verifyPkcs12Mac(authenticatedSafeBytes, macDataNode, password = '') {
+  if (!macDataNode) return { present: false, verified: null, supported: true };
+  const parsed = parseMacData(macDataNode);
+  const info = MAC_DIGESTS[parsed.digestOid];
+  if (!info) {
+    return {
+      present: true,
+      verified: null,
+      supported: false,
+      digestOid: parsed.digestOid,
+      iterations: parsed.iterations,
+      message: `Unsupported PKCS#12 MAC digest ${parsed.digestOid}`,
+    };
+  }
+  const keyBytes = await derivePkcs12Key({
+    ...info,
+    id: 3,
+    password,
+    salt: parsed.salt,
+    iterations: parsed.iterations,
+    length: info.u,
+  });
+  const key = await subtle().importKey('raw', keyBytes, { name: 'HMAC', hash: info.hash }, false, ['sign']);
+  const computed = new Uint8Array(await subtle().sign('HMAC', key, authenticatedSafeBytes));
+  const verified = equalBytes(computed, parsed.digestBytes);
+  return {
+    present: true,
+    verified,
+    supported: true,
+    digestOid: parsed.digestOid,
+    hash: info.hash,
+    iterations: parsed.iterations,
+    salt: bytesToHex(parsed.salt, ':'),
+    expected: bytesToHex(parsed.digestBytes, ':'),
+    computed: bytesToHex(computed, ':'),
+    message: verified ? `PKCS#12 integrity MAC verified (${info.hash})` : 'PKCS#12 integrity MAC verification failed',
+  };
 }
 
 export async function inspectPkcs12(input, password = '') {
@@ -145,15 +347,21 @@ export async function inspectPkcs12(input, password = '') {
   if (authSafe.oid !== OIDS.DATA || !authSafe.content) throw new Error(`Unsupported PKCS#12 authSafe content type ${authSafe.oid}`);
   const octet = unwrapExplicit(authSafe.content);
   if (!octet || octet.tagNumber !== 4) throw new Error('PKCS#12 authSafe does not contain an OCTET STRING');
+  const mac = await verifyPkcs12Mac(octet.value, parts[2] || null, password);
   const output = {
     version,
     certificates: [],
     keys: [],
+    bags: [],
     unsupportedContentTypes: [],
-    hasMacData: parts.length > 2,
-    macVerified: null,
+    unsupportedAlgorithms: [],
+    hasMacData: mac.present,
+    macVerified: mac.verified,
+    mac,
   };
   await parseAuthenticatedSafe(octet.value, password, output);
+  output.unsupportedAlgorithms = [...new Set(output.unsupportedAlgorithms.filter(Boolean))];
+  output.legacyProtectionDetected = output.unsupportedAlgorithms.some((oid) => oid.startsWith('1.2.840.113549.1.12.1.'));
   return output;
 }
 

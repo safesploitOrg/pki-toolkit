@@ -4,6 +4,54 @@ All notable changes to PKI Toolkit are documented here.
 
 The project is still pre-1.0; APIs and UI details may change while the parser and validation model are hardened.
 
+## [0.5.0-alpha.1] - 2026-10-02
+
+### Added
+
+- Name Constraints evaluation for `rfc822Name`, URI, IPv6 and `directoryName` in addition to DNS/IPv4.
+- Explicit RFC 5280 Internet-profile rejection for non-default GeneralSubtree `minimum`/`maximum` values.
+- PolicyMappings parsing plus stateful explicit-policy / inhibit-mapping / inhibit-any-policy handling for common multi-CA paths.
+- Optional strict supplied-root constraint mode.
+- PKCS#12 MacData verification for SHA-1/SHA-256/SHA-384/SHA-512.
+- PKCS#12 SafeBag `friendlyName` and `localKeyId` presentation.
+- Legacy PKCS#12 PBE detection without unsafe fallback decryption.
+- Base + delta CRL combination, `removeFromCRL`, indirect-entry issuer handling, IDP scope/reason masks and CRL metadata.
+- Delegated OCSP responder authorisation, CertID issuer-hash validation, nonce matching and producedAt/clock-skew/max-age controls.
+- Dedicated nonce-bearing delegated OCSP fixture and legacy PKCS#12 fixture.
+- Deterministic parser mutation fuzz smoke.
+- Pinned PKI.js/asn1js differential parser job for CI.
+- Pinned C2SP x509-limbo external parser-corpus smoke (informational while alpha).
+- axe accessibility scanning of primary routes in browser CI.
+- `RELEASE_CHECKLIST.md`, `THIRD_PARTY_NOTICES.md` and `scripts/rc-smoke.sh`.
+- Icons8 attribution link in the public footer for the supplied favicon.
+
+### Changed
+
+- PKCS#12 legacy protection is reported as unsupported content rather than causing a misleading generic parse failure.
+- CRL/OCSP UI exposes the new revocation-scope, base/delta and timing controls.
+- Trust Context now states whether supplied Root metadata is advisory or strict.
+- GitHub Pages deployment additionally waits for the PKI.js standards-hardening job.
+- Runtime remains dependency-free; PKI.js, asn1js, Playwright and axe are test-only CI installs.
+
+### Tests
+
+- Unit suite expanded from 32 to 42 tests, including new Name Constraints, policy-mapping, PKCS#12 integrity/attributes, delta/indirect CRL and delegated-OCSP cases.
+- Deterministic parser fuzzing currently executes 2,500 mutated DER cases per normal `npm run check`.
+
+### Security
+
+- Legacy RC2/3DES PKCS#12 decryption is intentionally not implemented in-house.
+- The public build retains `connect-src 'none'`, no telemetry and no runtime network APIs.
+- Generated test private keys/PFX material remains Git-ignored and regenerated in CI.
+
+### Remaining before stable v1.0
+
+- Complete RFC 5280 policy-tree semantics for exotic mapping/qualifier topologies.
+- Complete CRL distribution-point-name and less-common delta/indirect edge semantics against an external corpus.
+- First remote execution/triage of the newly added PKI.js/axe/x509-limbo jobs.
+- Representative real-world public/private PKI release-candidate matrix.
+- Legacy PKCS#12 PBE decryption only if it can be added without weakening the local security model.
+
 ## [0.4.0-alpha.1] - 2026-10-01
 
 ### Added

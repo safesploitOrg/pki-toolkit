@@ -289,3 +289,11 @@ input[type="file"].text-input { padding: 8px; height: auto; }
   .path-controls { width: 100%; justify-content: flex-start; }
   .path-select-wrap { min-width: 0; width: 100%; }
 }
+.inline-option { display: flex !important; gap: 10px; align-items: flex-start; margin: 12px 0 0 !important; font-weight: 400 !important; }
+.inline-option input { width: 17px; height: 17px; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+.inline-option strong, .inline-option small { display: block; }
+.inline-option small { margin-top: 2px; color: var(--muted); font-size: 0.76rem; line-height: 1.4; }
+.footer-links { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.footer-credit { color: var(--muted); text-decoration: none; }
+.footer-credit:hover { color: var(--accent); }
+@media (max-width: 720px) { .footer-links { justify-content: flex-start; } }

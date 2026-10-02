@@ -1,6 +1,6 @@
 # Browser tests
 
-Browser E2E is defined in `app.spec.js` and executed in GitHub Actions with a pinned Playwright release.
+Browser E2E is defined in `app.spec.js` and executed in GitHub Actions with pinned Playwright/axe releases.
 
 Current projects:
 
@@ -16,6 +16,7 @@ Current smoke coverage:
 - generated `fullchain.pem` visibility;
 - certificate ↔ private-key matching;
 - CSR signature verification;
-- route/landmark/footer/favicon checks.
+- route/landmark/footer/favicon checks;
+- axe scans across the primary routes, failing on serious/critical accessibility violations.
 
-The Playwright package and browser engines are installed only in CI and are not runtime dependencies of the static site.
+The Playwright/axe packages and browser engines are installed only in CI and are not runtime dependencies of the static site.

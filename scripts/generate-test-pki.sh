@@ -134,6 +134,10 @@ openssl crl2pkcs7 -nocrl -certfile "$WORK_DIR/leaf.pem" -certfile "$WORK_DIR/int
   -outform DER -out "$OUT_DIR/formats/chain.p7b" >/dev/null 2>&1
 openssl pkcs12 -export -inkey "$WORK_DIR/leaf.key" -in "$WORK_DIR/leaf.pem" -certfile "$WORK_DIR/chain.pem" \
   -name "server01.example.test" -passout pass:testpass -out "$OUT_DIR/formats/server.p12" >/dev/null 2>&1
+# Legacy PKCS#12 fixture is intentionally generated to verify that the parser
+# reports legacy PBE clearly rather than attempting unreviewed RC2/3DES crypto.
+openssl pkcs12 -export -legacy -inkey "$WORK_DIR/leaf.key" -in "$WORK_DIR/leaf.pem" -certfile "$WORK_DIR/chain.pem" \
+  -name "server01.example.test legacy" -passout pass:testpass -out "$OUT_DIR/formats/server-legacy.p12" >/dev/null 2>&1
 openssl x509 -in "$WORK_DIR/leaf.pem" -outform DER -out "$OUT_DIR/formats/server.cer"
 
 # ECDSA P-256 hierarchy.
@@ -241,6 +245,33 @@ stateOrProvinceName = optional
 localityName = optional
 emailAddress = optional
 CFG
+# Dedicated delegated OCSP responder, issued directly by Intermediate CA 2.
+# The response is generated from a nonce-bearing request and embeds the
+# responder certificate so delegated-authorisation and nonce handling can be
+# exercised without network access.
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$WORK_DIR/ocsp-responder.key" >/dev/null 2>&1
+openssl req -new -key "$WORK_DIR/ocsp-responder.key" \
+  -subj "/C=GB/O=Certificate Tool Tests/CN=Test OCSP Responder" \
+  -out "$WORK_DIR/ocsp-responder.csr"
+cat > "$WORK_DIR/ocsp-responder-ext.cnf" <<'CFG'
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=OCSPSigning
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid,issuer
+noCheck=1.3.6.1.5.5.7.48.1.5;ASN1:NULL
+CFG
+openssl x509 -req -sha256 -days 365 -in "$WORK_DIR/ocsp-responder.csr" \
+  -CA "$WORK_DIR/int2.pem" -CAkey "$WORK_DIR/int2.key" -CAcreateserial \
+  -extfile "$WORK_DIR/ocsp-responder-ext.cnf" -out "$WORK_DIR/ocsp-responder.pem" >/dev/null 2>&1
+openssl ocsp -issuer "$WORK_DIR/int2.pem" -cert "$WORK_DIR/leaf.pem" -nonce \
+  -reqout "$WORK_DIR/ocsp-nonce-request.der" >/dev/null 2>&1
+openssl ocsp -index "$WORK_DIR/int2-ca/index.txt" \
+  -rsigner "$WORK_DIR/ocsp-responder.pem" -rkey "$WORK_DIR/ocsp-responder.key" \
+  -CA "$WORK_DIR/int2.pem" -reqin "$WORK_DIR/ocsp-nonce-request.der" \
+  -ndays 1 -respout "$OUT_DIR/revocation/ocsp-delegated-nonce.der" >/dev/null 2>&1
+cp "$WORK_DIR/ocsp-responder.pem" "$OUT_DIR/revocation/ocsp-responder.pem"
+
 # Good OCSP response before revocation.
 openssl ocsp -index "$WORK_DIR/int2-ca/index.txt" -rsigner "$WORK_DIR/int2.pem" -rkey "$WORK_DIR/int2.key" \
   -CA "$WORK_DIR/int2.pem" -issuer "$WORK_DIR/int2.pem" -cert "$WORK_DIR/leaf.pem" -resp_no_certs \

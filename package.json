@@ -1,16 +1,21 @@
 {
   "name": "pki-toolkit",
-  "version": "0.4.0-alpha.1",
+  "version": "0.5.0-alpha.1",
   "private": true,
   "description": "Browser-only PKI toolkit for X.509 chain validation, private-key matching, CSR inspection, certificate containers and revocation evidence.",
   "type": "module",
   "scripts": {
     "test": "node --test tests/unit/*.test.js",
-    "check:syntax": "find public/assets/js -name '*.js' -print0 | xargs -0 -n1 node --check",
-    "check": "npm run check:syntax && npm test && npm run test:differential",
+    "check:syntax": "find public/assets/js scripts tests -type f -name '*.js' -print0 | xargs -0 -n1 node --check && find scripts -type f -name '*.mjs' -print0 | xargs -0 -n1 node --check",
+    "check": "npm run check:syntax && npm test && npm run test:differential && npm run test:fuzz",
     "serve": "python3 -m http.server 4173 --directory public",
     "fixtures": "bash scripts/generate-test-pki.sh",
-    "test:differential": "bash scripts/openssl-differential.sh"
+    "test:differential": "bash scripts/openssl-differential.sh",
+    "test:pkijs": "node scripts/pkijs-differential.mjs",
+    "test:fuzz": "node scripts/parser-fuzz.mjs",
+    "test:limbo": "node scripts/x509-limbo-smoke.mjs",
+    "test:browser": "playwright test",
+    "test:rc": "bash scripts/rc-smoke.sh"
   },
   "engines": {
     "node": ">=20"

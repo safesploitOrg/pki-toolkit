@@ -48,6 +48,10 @@
 
       <div class="notice info">
         <strong>Trust model:</strong> this tool can validate a path against the Root CA you supply. It cannot inspect the operating-system or browser trust store from a normal GitHub Pages application.
+        <label class="inline-option" for="strict-root-constraints">
+          <input id="strict-root-constraints" type="checkbox">
+          <span><strong>Strict supplied-root metadata</strong><small>Also enforce Basic Constraints, Key Usage, Name Constraints and policy state encoded in the supplied Root certificate. Leave off to model common trust-anchor behaviour where platform metadata can differ from the certificate.</small></span>
+        </label>
       </div>
 
       <form id="certificate-form" novalidate>
@@ -347,7 +351,7 @@
           <div id="pkcs12-result" class="tool-inline-result"></div>
         </form>
       </div>
-      <div class="notice info"><strong>Compatibility:</strong> PFX/P12 support targets modern PBES2 + PBKDF2 + AES-CBC containers. Legacy PKCS#12 PBE algorithms are reported as unsupported rather than silently mishandled.</div>
+      <div class="notice info"><strong>Compatibility:</strong> PFX/P12 integrity <code>MacData</code> is verified for SHA-1/SHA-256/SHA-384/SHA-512. Modern PBES2 + PBKDF2 + AES-CBC bags are decrypted locally. Legacy PKCS#12 PBE algorithms are detected and reported explicitly rather than silently mishandled.</div>
     </section>
 
     <section class="route hidden" data-route="revocation">
@@ -358,6 +362,10 @@
           <label for="crl-input">PEM CRL</label><textarea id="crl-input" spellcheck="false" placeholder="-----BEGIN X509 CRL-----"></textarea>
           <label for="crl-issuer-input">Issuer CA certificate</label><textarea id="crl-issuer-input" class="small-textarea" spellcheck="false"></textarea>
           <label for="crl-cert-input">Certificate to check <span class="muted">(optional)</span></label><textarea id="crl-cert-input" class="small-textarea" spellcheck="false"></textarea>
+          <details>
+            <summary>Delta CRL: supply the base CRL <span class="muted">(optional)</span></summary>
+            <label for="crl-base-input">Base CRL</label><textarea id="crl-base-input" class="small-textarea" spellcheck="false" placeholder="-----BEGIN X509 CRL-----"></textarea>
+          </details>
           <div class="form-actions"><button class="primary-button" type="submit">Validate CRL</button></div>
           <div id="crl-result" class="tool-inline-result"></div>
         </form>
@@ -366,6 +374,12 @@
           <label for="ocsp-file">DER/PEM OCSP response</label><input id="ocsp-file" class="text-input" type="file" accept=".der,.ocsp,.pem">
           <label for="ocsp-issuer-input">Issuer CA certificate</label><textarea id="ocsp-issuer-input" class="small-textarea" spellcheck="false"></textarea>
           <label for="ocsp-cert-input">Certificate to check <span class="muted">(optional)</span></label><textarea id="ocsp-cert-input" class="small-textarea" spellcheck="false"></textarea>
+          <details>
+            <summary>OCSP freshness / nonce policy</summary>
+            <label for="ocsp-clock-skew">Allowed clock skew (seconds)</label><input id="ocsp-clock-skew" class="text-input" type="number" min="0" max="3600" value="300">
+            <label for="ocsp-max-age">Maximum response age (hours) <span class="muted">(optional)</span></label><input id="ocsp-max-age" class="text-input" type="number" min="0" step="0.25" placeholder="e.g. 24">
+            <label for="ocsp-expected-nonce">Expected request nonce (hex) <span class="muted">(optional)</span></label><input id="ocsp-expected-nonce" class="text-input mono" type="text" autocomplete="off" spellcheck="false" placeholder="01:23:45:67:89:AB">
+          </details>
           <div class="form-actions"><button class="primary-button" type="submit">Validate OCSP</button></div>
           <div id="ocsp-result" class="tool-inline-result"></div>
         </form>
@@ -409,7 +423,10 @@
   <footer class="site-footer">
     <div class="shell footer-inner">
       <span>© <span id="footer-year">2026</span> · PKI Toolkit</span>
-      <a class="footer-repo" href="https://github.com/safesploitOrg/pki-toolkit" target="_blank" rel="noopener noreferrer">github.com/safesploitOrg/pki-toolkit ↗</a>
+      <div class="footer-links">
+        <a class="footer-repo" href="https://github.com/safesploitOrg/pki-toolkit" target="_blank" rel="noopener noreferrer">github.com/safesploitOrg/pki-toolkit ↗</a>
+        <a class="footer-credit" href="https://icons8.com" target="_blank" rel="noopener noreferrer">Certificate icon by Icons8 ↗</a>
+      </div>
     </div>
   </footer>
 </body>

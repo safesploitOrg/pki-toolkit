@@ -26,6 +26,7 @@ Routes:
 7. Unknown critical semantics produce an indeterminate result rather than a false pass.
 8. Secret material is never deliberately persisted or transmitted.
 9. Network-assisted AIA/OCSP/CRL retrieval is disabled in the public build.
+10. Legacy crypto must not be added as an ad-hoc fallback merely for compatibility.
 
 ## 3. Certificate flow
 
@@ -33,7 +34,7 @@ Routes:
 PEM / DER
    |
    v
-DER/X.509 parser
+strict DER/X.509 parser
    |
    +--> identity / SAN / KU / EKU / policies / constraints / AIA / CRL DP
    |
@@ -49,7 +50,7 @@ all valid paths to supplied trust anchors
    |
    +--> selected path (user switchable when multiple paths exist)
    +--> time sanity
-   +--> RFC constraint subset
+   +--> supported RFC 5280 constraints
    +--> hostname/SAN
    +--> bundle-order comparison
    +--> corrected fullchain.pem
@@ -70,7 +71,18 @@ Traversal:
 
 The UI's Root → Intermediate(s) → Server fields are a human-friendly input order, not the internal model.
 
-## 5. TLS bundle model
+## 5. Trust-anchor model
+
+The default model treats a supplied Root CA as an externally configured trust anchor. This mirrors the important distinction between certificate-path validation and a platform trust-store decision: the application can prove that a signature path reaches the supplied anchor, but it cannot inspect whether Windows/macOS/Linux/browser/JVM trust that anchor.
+
+Two modes exist:
+
+- **Advisory supplied-root metadata (default):** Root certificate Basic Constraints/KU/Name Constraints/policy metadata is reported but does not attempt to model every platform's trust-anchor semantics.
+- **Strict supplied-root metadata:** supported Root certificate constraints are enforced as if the supplied Root certificate metadata is authoritative.
+
+Neither mode claims to enumerate or reproduce the host OS/browser trust store.
+
+## 6. TLS bundle model
 
 Certification path:
 
@@ -89,7 +101,7 @@ Intermediate nearest root
 
 The Root is normally omitted. Bundle analysis is therefore separate from path validation.
 
-## 6. Validation domains
+## 7. Validation domains
 
 ### Cryptographic path
 
@@ -111,30 +123,32 @@ The Root is normally omitted. Bundle analysis is therefore separate from path va
 - issuer expires before child;
 - issuer starts after child.
 
-Trust-anchor validity remains advisory because platform handling can differ.
+Trust-anchor validity remains separately described because platform handling can differ.
 
 ### X.509 constraints
 
 `chain-validator.js`
 
-Implemented:
+Implemented/conservatively modelled:
 
 - Basic Constraints;
 - Key Usage;
 - EKU;
-- pathLenConstraint;
-- DNS and IPv4 Name Constraints subset;
+- `pathLenConstraint`;
+- Name Constraints for DNS, IPv4, IPv6, rfc822Name, URI and directoryName;
+- RFC 5280 Internet-profile rejection of non-default GeneralSubtree min/max;
 - Certificate Policies inventory;
-- common Policy Constraints/Inhibit Any Policy cases;
+- explicit-policy, inhibit-any-policy and inhibit-policy-mapping counters;
+- common PolicyMappings transitions across multi-CA paths;
 - duplicate extensions;
 - empty-Subject/SAN requirement;
 - unknown critical extensions;
 - malformed wildcard SANs;
 - very large SAN warnings.
 
-Full RFC 5280 policy processing and every GeneralName constraint type remain release-hardening work.
+The policy engine is deliberately conservative. It does not yet claim the complete RFC 5280 policy-tree algorithm for every qualifier/mapping/intersection topology. Complex cases that cannot be proven are reported as indeterminate.
 
-## 7. Private-key architecture
+## 8. Private-key architecture
 
 `private-key.js`
 
@@ -147,7 +161,7 @@ Supported input containers:
 
 After Web Crypto import, public JWK parameters are derived from the private CryptoKey, re-imported as a public key and exported as SPKI. Its SHA-256 fingerprint is compared with the certificate/CSR SPKI fingerprint.
 
-## 8. CSR architecture
+## 9. CSR architecture
 
 `csr.js`
 
@@ -155,36 +169,52 @@ Parses PKCS#10 CertificationRequestInfo, Subject, SPKI and extensionRequest attr
 
 Optional comparisons reuse the private-key matcher and certificate parser.
 
-## 9. Container formats
+## 10. Container formats
 
 `formats.js`
 
 - PKCS#7 SignedData certificate extraction.
-- PKCS#12 AuthenticatedSafe / SafeBag traversal for Data and modern PBES2 EncryptedData content.
+- PKCS#12 AuthenticatedSafe / SafeBag traversal.
+- modern PBES2/PBKDF2/AES-CBC EncryptedData and shrouded-key decryption.
+- PKCS#12 MacData verification using the RFC 7292 password-based KDF and HMAC through Web Crypto.
+- SHA-1/SHA-256/SHA-384/SHA-512 MacData digests.
 - CertBag, KeyBag and PKCS8ShroudedKeyBag inventory.
+- friendlyName/localKeyId presentation.
+- legacy PKCS#12 protection OID detection without in-house RC2/3DES implementation.
 
-PKCS#12 MacData verification and legacy PBE algorithms are deliberately not claimed yet.
+Legacy PBE decryption remains intentionally unsupported until it can be provided by a reviewed local dependency or appropriate platform primitive without weakening the security model.
 
-## 10. Revocation
+## 11. Revocation architecture
 
 `revocation.js`
 
-CRL:
+### CRL
 
 - issuer, update times and revoked serials;
 - CRL signature verification;
-- optional target-certificate lookup.
+- CRL number and delta CRL indicator;
+- Issuing Distribution Point scope flags/reason masks;
+- certificateIssuer handling for indirect CRL entries;
+- optional target-certificate lookup;
+- base + delta CRL combination;
+- `removeFromCRL` handling;
+- explicit inconclusive state for partial reason coverage.
 
-OCSP:
+### OCSP
 
 - OCSPResponse / BasicOCSPResponse parsing;
-- responder metadata and SingleResponse statuses;
+- responder-by-name/key-hash selection;
 - response signature verification;
-- basic delegated-responder OCSP Signing EKU check.
+- CertID issuer-name/key-hash verification;
+- delegated responder direct-issuer signature and OCSPSigning EKU checks;
+- signer validity at producedAt;
+- SingleResponse freshness;
+- nonce comparison;
+- configurable clock skew and producedAt maximum-age policy.
 
 Imported evidence avoids any runtime network dependency.
 
-## 11. Key modules
+## 12. Key modules
 
 ```text
 asn1.js              strict DER reader/primitive decoders
@@ -203,20 +233,39 @@ commands.js          static command reference
 app.js               routes, state and rendering
 ```
 
-## 12. Testing
+## 13. Test architecture
 
-Core CI:
+Core local/CI path:
 
 ```text
-fixture generation (OpenSSL)
+OpenSSL fixture generation
         |
 syntax checks
         |
-32+ unit tests
+unit tests
         |
 OpenSSL differential verification
         |
-static security assertions
+deterministic DER mutation fuzzing
+        |
+static CSP / no-network assertions
 ```
 
-Browser CI runs Playwright against Chromium, Firefox and WebKit plus a mobile Chromium viewport. GitHub Pages deployment depends on both test groups.
+Additional GitHub Actions hardening:
+
+```text
+PKI.js + asn1js differential parser comparison  (gating)
+C2SP x509-limbo pinned corpus parser smoke       (informational while alpha)
+Playwright Chromium / Firefox / WebKit           (gating)
+axe serious/critical accessibility scan          (gating)
+```
+
+The external packages are test-only and installed in CI; they are not runtime dependencies of `public/`.
+
+The x509-limbo corpus is pinned by commit SHA to keep results reproducible. It is initially informational so incompatibilities are visible and triaged rather than causing developers to disable the corpus wholesale. Selected semantic cases should become gating as the remaining policy/constraint work matures.
+
+## 14. Release model
+
+`public/` is the complete deployable site. Pages deployment is separate from validation and depends on the core, standards-hardening and browser jobs.
+
+`scripts/rc-smoke.sh` and `RELEASE_CHECKLIST.md` provide a repeatable pre-release path for local and manual checks that cannot be represented by unit tests alone.

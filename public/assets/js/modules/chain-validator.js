@@ -22,6 +22,7 @@ const RECOGNISED_CRITICAL_EXTENSIONS = new Set([
   OIDS.NAME_CONSTRAINTS,
   OIDS.POLICY_CONSTRAINTS,
   OIDS.INHIBIT_ANY_POLICY,
+  OIDS.POLICY_MAPPINGS,
 ]);
 
 function certId(cert) {
@@ -147,50 +148,197 @@ function parseIpv4(value) {
   return Uint8Array.from(nums);
 }
 
-function ipWithinConstraint(value, constraint) {
-  if (constraint.family !== 4) return null;
-  const ip = parseIpv4(value);
-  if (!ip) return null;
-  for (let i = 0; i < 4; i += 1) {
+function parseIpv6(value) {
+  let text = String(value || '').trim().toLowerCase();
+  if (!text.includes(':')) return null;
+  const zone = text.indexOf('%');
+  if (zone >= 0) text = text.slice(0, zone);
+
+  let ipv4Tail = null;
+  if (text.includes('.')) {
+    const lastColon = text.lastIndexOf(':');
+    if (lastColon < 0) return null;
+    ipv4Tail = parseIpv4(text.slice(lastColon + 1));
+    if (!ipv4Tail) return null;
+    text = `${text.slice(0, lastColon)}:${((ipv4Tail[0] << 8) | ipv4Tail[1]).toString(16)}:${((ipv4Tail[2] << 8) | ipv4Tail[3]).toString(16)}`;
+  }
+
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(':').filter(Boolean) : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':').filter(Boolean) : [];
+  if (halves.length === 1 && left.length !== 8) return null;
+  if (left.length + right.length > 8) return null;
+  const missing = halves.length === 2 ? 8 - left.length - right.length : 0;
+  if (halves.length === 2 && missing < 1) return null;
+  const groups = [...left, ...Array(missing).fill('0'), ...right];
+  if (groups.length !== 8) return null;
+  const out = new Uint8Array(16);
+  for (let i = 0; i < 8; i += 1) {
+    if (!/^[0-9a-f]{1,4}$/i.test(groups[i])) return null;
+    const num = Number.parseInt(groups[i], 16);
+    out[i * 2] = (num >> 8) & 0xff;
+    out[i * 2 + 1] = num & 0xff;
+  }
+  return out;
+}
+
+function ipBytes(value, familyHint = null) {
+  if (value instanceof Uint8Array) return value;
+  if (familyHint === 4 || String(value).includes('.')) return parseIpv4(value);
+  if (familyHint === 6 || String(value).includes(':')) return parseIpv6(value);
+  return null;
+}
+
+function ipWithinConstraint(san, constraint) {
+  const ip = san?.bytes instanceof Uint8Array ? san.bytes : ipBytes(san?.value ?? san, san?.family);
+  if (!ip || !constraint?.address || !constraint?.mask) return null;
+  if ((constraint.family === 4 && ip.length !== 4) || (constraint.family === 6 && ip.length !== 16)) return false;
+  if (constraint.address.length !== ip.length || constraint.mask.length !== ip.length) return false;
+  for (let i = 0; i < ip.length; i += 1) {
     if ((ip[i] & constraint.mask[i]) !== (constraint.address[i] & constraint.mask[i])) return false;
   }
   return true;
 }
 
-function evaluateNameConstraints(path) {
+function emailWithinConstraint(mailbox, constraint) {
+  const value = String(mailbox || '').trim().toLowerCase();
+  const c = String(constraint || '').trim().toLowerCase();
+  if (!value || !c) return false;
+  const at = value.lastIndexOf('@');
+  if (at < 1 || at === value.length - 1) return false;
+  const local = value.slice(0, at);
+  const domain = normaliseDns(value.slice(at + 1));
+  if (c.includes('@')) {
+    const split = c.lastIndexOf('@');
+    return local === c.slice(0, split) && domain === normaliseDns(c.slice(split + 1));
+  }
+  if (c.startsWith('.')) return domain.endsWith(c) && domain.length > c.length;
+  return domain === normaliseDns(c);
+}
+
+function uriHost(uri) {
+  try {
+    const parsed = new URL(String(uri));
+    return normaliseDns(parsed.hostname);
+  } catch {
+    return null;
+  }
+}
+
+function uriWithinConstraint(uri, constraint) {
+  const host = uriHost(uri);
+  const c = normaliseDns(constraint);
+  if (!host || !c) return false;
+  if (c.startsWith('.')) return host.endsWith(c) && host.length > c.length;
+  return host === c;
+}
+
+function canonicalRdn(rdn) {
+  return [...(rdn || [])]
+    .map((a) => `${a.oid}=${String(a.value).trim().replace(/\s+/g, ' ').toLowerCase()}`)
+    .sort()
+    .join('+');
+}
+
+function directoryNameWithinConstraint(name, constraintName) {
+  if (!name?.rdns || !constraintName?.rdns) return false;
+  if (constraintName.rdns.length > name.rdns.length) return false;
+  for (let i = 0; i < constraintName.rdns.length; i += 1) {
+    if (canonicalRdn(name.rdns[i]) !== canonicalRdn(constraintName.rdns[i])) return false;
+  }
+  return true;
+}
+
+function candidateNamesForCertificate(cert) {
+  const candidates = {
+    DNS: [],
+    IP: [],
+    email: [],
+    URI: [],
+    directoryName: [],
+  };
+  for (const san of cert.extensions.subjectAltName || []) {
+    if (candidates[san.type]) candidates[san.type].push(san);
+  }
+  if (!cert.subjectEmpty && cert.subject?.rdns?.length) {
+    candidates.directoryName.push({ type: 'directoryName', value: cert.subject });
+  }
+  for (const attribute of cert.subject?.attributes || []) {
+    if (attribute.oid === '1.2.840.113549.1.9.1') candidates.email.push({ type: 'email', value: attribute.value, source: 'subject' });
+  }
+  return candidates;
+}
+
+function generalNameMatchesConstraint(candidate, constraint) {
+  switch (constraint.type) {
+    case 'DNS': return dnsWithinConstraint(candidate.value, constraint.value);
+    case 'IP': return ipWithinConstraint(candidate, constraint) === true;
+    case 'email': return emailWithinConstraint(candidate.value, constraint.value);
+    case 'URI': return uriWithinConstraint(candidate.value, constraint.value);
+    case 'directoryName': return directoryNameWithinConstraint(candidate.value, constraint.value);
+    default: return null;
+  }
+}
+
+function displayGeneralName(candidate) {
+  if (candidate.type === 'directoryName') return candidate.value?.display || '(empty directoryName)';
+  return String(candidate.value || '(empty)');
+}
+
+function evaluateNameConstraints(path, { enforceTrustAnchorConstraints = false } = {}) {
   const issues = [];
-  for (let caIndex = 1; caIndex < path.length - 1; caIndex += 1) {
+  const lastCaIndex = enforceTrustAnchorConstraints ? path.length - 1 : path.length - 2;
+  for (let caIndex = 1; caIndex <= lastCaIndex; caIndex += 1) {
     const ca = path[caIndex];
     const nc = ca.extensions.nameConstraints;
     if (!nc) continue;
-    const unsupported = [...nc.permitted, ...nc.excluded].filter((item) =>
-      !['DNS', 'IP'].includes(item.type) || item.minimum !== 0 || item.maximum !== null || (item.type === 'IP' && item.family !== 4));
-    if (unsupported.length) {
-      issues.push({ status: 'unknown', code: 'name-constraints-partial', cert: ca, message: `${getCertificateDisplayName(ca)} contains Name Constraints types/limits this release cannot fully evaluate` });
+
+    // RFC 5280's Internet profile requires minimum=0 and maximum absent. Treat
+    // other values as an invalid constraint encoding rather than silently
+    // ignoring them or pretending to understand non-profile semantics.
+    const nonProfileDistance = [...nc.permitted, ...nc.excluded].filter((item) => item.minimum !== 0 || item.maximum !== null);
+    if (nonProfileDistance.length) {
+      issues.push({
+        status: 'invalid',
+        code: 'name-constraints-minmax-profile',
+        cert: ca,
+        message: `${getCertificateDisplayName(ca)} uses non-default GeneralSubtree minimum/maximum values, which are not permitted by the RFC 5280 Internet profile`,
+      });
     }
 
-    const permittedDns = nc.permitted.filter((item) => item.type === 'DNS' && item.minimum === 0 && item.maximum === null);
-    const excludedDns = nc.excluded.filter((item) => item.type === 'DNS' && item.minimum === 0 && item.maximum === null);
-    const permittedIp = nc.permitted.filter((item) => item.type === 'IP' && item.family === 4 && item.minimum === 0 && item.maximum === null);
-    const excludedIp = nc.excluded.filter((item) => item.type === 'IP' && item.family === 4 && item.minimum === 0 && item.maximum === null);
+    const supportedTypes = new Set(['DNS', 'IP', 'email', 'URI', 'directoryName']);
+    const unsupported = [...nc.permitted, ...nc.excluded].filter((item) => !supportedTypes.has(item.type));
+    if (unsupported.length) {
+      issues.push({ status: 'unknown', code: 'name-constraints-unsupported-name-form', cert: ca, message: `${getCertificateDisplayName(ca)} contains unsupported Name Constraints GeneralName form(s)` });
+    }
 
     for (const subordinate of path.slice(0, caIndex)) {
-      const sans = subordinate.extensions.subjectAltName || [];
-      for (const san of sans) {
-        if (san.type === 'DNS') {
-          if (excludedDns.some((constraint) => dnsWithinConstraint(san.value, constraint.value))) {
-            issues.push({ status: 'invalid', code: 'name-constraint-excluded', cert: subordinate, message: `${san.value} is excluded by Name Constraints on ${getCertificateDisplayName(ca)}` });
+      // RFC 5280 does not apply name constraints to self-issued intermediates
+      // unless that certificate is the final certificate in the path.
+      if (subordinate !== path[0] && subordinate.selfIssued) continue;
+      const candidates = candidateNamesForCertificate(subordinate);
+      for (const type of supportedTypes) {
+        const excluded = nc.excluded.filter((item) => item.type === type && item.minimum === 0 && item.maximum === null);
+        const permitted = nc.permitted.filter((item) => item.type === type && item.minimum === 0 && item.maximum === null);
+        for (const candidate of candidates[type] || []) {
+          const excludedCode = type === 'DNS' ? 'name-constraint-excluded' : `${type.toLowerCase()}-name-constraint-excluded`;
+          const permittedCode = type === 'DNS' ? 'name-constraint-not-permitted' : `${type.toLowerCase()}-name-constraint-not-permitted`;
+          if (excluded.some((constraint) => generalNameMatchesConstraint(candidate, constraint) === true)) {
+            issues.push({
+              status: 'invalid',
+              code: excludedCode,
+              cert: subordinate,
+              message: `${displayGeneralName(candidate)} is excluded by ${type} Name Constraints on ${getCertificateDisplayName(ca)}`,
+            });
           }
-          if (permittedDns.length && !permittedDns.some((constraint) => dnsWithinConstraint(san.value, constraint.value))) {
-            issues.push({ status: 'invalid', code: 'name-constraint-not-permitted', cert: subordinate, message: `${san.value} is outside permitted DNS Name Constraints on ${getCertificateDisplayName(ca)}` });
-          }
-        }
-        if (san.type === 'IP') {
-          if (excludedIp.some((constraint) => ipWithinConstraint(san.value, constraint) === true)) {
-            issues.push({ status: 'invalid', code: 'ip-name-constraint-excluded', cert: subordinate, message: `${san.value} is excluded by IP Name Constraints on ${getCertificateDisplayName(ca)}` });
-          }
-          if (permittedIp.length && !permittedIp.some((constraint) => ipWithinConstraint(san.value, constraint) === true)) {
-            issues.push({ status: 'invalid', code: 'ip-name-constraint-not-permitted', cert: subordinate, message: `${san.value} is outside permitted IP Name Constraints on ${getCertificateDisplayName(ca)}` });
+          if (permitted.length && !permitted.some((constraint) => generalNameMatchesConstraint(candidate, constraint) === true)) {
+            issues.push({
+              status: 'invalid',
+              code: permittedCode,
+              cert: subordinate,
+              message: `${displayGeneralName(candidate)} is outside permitted ${type} Name Constraints on ${getCertificateDisplayName(ca)}`,
+            });
           }
         }
       }
@@ -199,20 +347,107 @@ function evaluateNameConstraints(path) {
   return issues;
 }
 
-function evaluatePolicyConstraints(path) {
+function minCounter(current, value) {
+  if (value === null || value === undefined) return current;
+  return Math.min(current, Number(value));
+}
+
+function decrementPolicyCounter(value, cert) {
+  if (!Number.isFinite(value)) return value;
+  if (cert?.selfIssued) return value;
+  return Math.max(0, value - 1);
+}
+
+/**
+ * Stateful RFC 5280 policy processing for the common Internet-PKI cases.
+ * This models explicit-policy, inhibit-any-policy and policy-mapping counters,
+ * including PolicyMappings transitions. It intentionally does not claim the
+ * full RFC policy-tree/qualifier algorithm for every exotic mapping topology.
+ */
+function evaluatePolicyConstraints(path, { enforceTrustAnchorConstraints = false } = {}) {
   const issues = [];
-  const leaf = path[0];
-  for (const ca of path.slice(1, -1)) {
-    const pc = ca.extensions.policyConstraints;
-    if (pc?.requireExplicitPolicy === 0 && !(leaf.extensions.certificatePolicies || []).length) {
-      issues.push({ status: 'invalid', code: 'explicit-policy-required', cert: leaf, message: `${getCertificateDisplayName(ca)} requires an explicit certificate policy, but the leaf has no Certificate Policies extension` });
+  let explicitPolicy = Number.POSITIVE_INFINITY;
+  let inhibitPolicyMapping = Number.POSITIVE_INFINITY;
+  let inhibitAnyPolicy = Number.POSITIVE_INFINITY;
+  let expectedPolicies = null; // null means unconstrained/any policy at this point.
+  let policyTreeIndeterminate = false;
+
+  const processing = path.slice(0, -1).reverse(); // highest intermediate -> leaf
+  if (enforceTrustAnchorConstraints && path.length) processing.unshift(path.at(-1));
+
+  processing.forEach((cert, index) => {
+    const isLeaf = cert === path[0];
+    const policies = new Set(cert.extensions.certificatePolicies || []);
+    const hasAny = policies.has(ANY_POLICY);
+    const specific = new Set([...policies].filter((oid) => oid !== ANY_POLICY));
+
+    if (explicitPolicy === 0 && !policies.size) {
+      issues.push({ status: 'invalid', code: 'explicit-policy-required', cert, message: `${getCertificateDisplayName(cert)} has no Certificate Policies extension while explicit policy is required` });
     }
-    if (ca.extensions.inhibitAnyPolicy === 0) {
-      const policies = leaf.extensions.certificatePolicies || [];
-      if (policies.length === 1 && policies[0] === ANY_POLICY) {
-        issues.push({ status: 'invalid', code: 'any-policy-inhibited', cert: leaf, message: `${getCertificateDisplayName(ca)} inhibits anyPolicy, but the leaf only asserts anyPolicy` });
+
+    if (expectedPolicies !== null) {
+      const next = new Set([...specific].filter((oid) => expectedPolicies.has(oid)));
+      if (hasAny && inhibitAnyPolicy > 0) {
+        for (const oid of expectedPolicies) next.add(oid);
+      }
+      if (!next.size && policies.size && !(hasAny && inhibitAnyPolicy > 0)) {
+        if (explicitPolicy === 0 || isLeaf) {
+          issues.push({ status: 'invalid', code: 'policy-tree-empty', cert, message: `${getCertificateDisplayName(cert)} does not assert a policy that remains valid on this certification path` });
+        } else {
+          policyTreeIndeterminate = true;
+        }
+      }
+      expectedPolicies = next.size ? next : expectedPolicies;
+    } else if (specific.size) {
+      expectedPolicies = specific;
+    } else if (hasAny && inhibitAnyPolicy === 0) {
+      issues.push({ status: 'invalid', code: 'any-policy-inhibited', cert, message: `${getCertificateDisplayName(cert)} relies on anyPolicy after anyPolicy has been inhibited` });
+    }
+
+    const mappings = cert.extensions.policyMappings || [];
+    for (const mapping of mappings) {
+      if (mapping.issuerDomainPolicy === ANY_POLICY || mapping.subjectDomainPolicy === ANY_POLICY) {
+        issues.push({ status: 'invalid', code: 'any-policy-mapping', cert, message: `${getCertificateDisplayName(cert)} contains a PolicyMappings entry involving anyPolicy, which RFC 5280 forbids` });
       }
     }
+    if (!isLeaf && mappings.length) {
+      if (inhibitPolicyMapping === 0) {
+        if (expectedPolicies && mappings.some((mapping) => expectedPolicies.has(mapping.issuerDomainPolicy))) {
+          issues.push({ status: 'invalid', code: 'policy-mapping-inhibited', cert, message: `${getCertificateDisplayName(cert)} requires a policy mapping after policy mapping has been inhibited` });
+        }
+      } else if (expectedPolicies) {
+        const mapped = new Set(expectedPolicies);
+        for (const mapping of mappings) {
+          if (expectedPolicies.has(mapping.issuerDomainPolicy)) {
+            mapped.delete(mapping.issuerDomainPolicy);
+            mapped.add(mapping.subjectDomainPolicy);
+          }
+        }
+        expectedPolicies = mapped;
+      }
+    }
+
+    if (!isLeaf) {
+      const pc = cert.extensions.policyConstraints;
+      explicitPolicy = minCounter(explicitPolicy, pc?.requireExplicitPolicy);
+      inhibitPolicyMapping = minCounter(inhibitPolicyMapping, pc?.inhibitPolicyMapping);
+      inhibitAnyPolicy = minCounter(inhibitAnyPolicy, cert.extensions.inhibitAnyPolicy);
+    }
+
+    const nextCert = processing[index + 1];
+    if (nextCert) {
+      explicitPolicy = decrementPolicyCounter(explicitPolicy, nextCert);
+      inhibitPolicyMapping = decrementPolicyCounter(inhibitPolicyMapping, nextCert);
+      inhibitAnyPolicy = decrementPolicyCounter(inhibitAnyPolicy, nextCert);
+    }
+  });
+
+  if (policyTreeIndeterminate && !issues.some((issue) => issue.status === 'invalid')) {
+    issues.push({
+      status: 'unknown',
+      code: 'policy-tree-complex',
+      message: 'Certificate policy processing encountered a mapping/intersection case that cannot be proven valid by the current policy-state engine',
+    });
   }
   return issues;
 }
@@ -259,7 +494,7 @@ function evaluateStructuralSanity(path) {
   return issues;
 }
 
-export function evaluateConstraints(pathLeafToRoot) {
+export function evaluateConstraints(pathLeafToRoot, { enforceTrustAnchorConstraints = false } = {}) {
   const issues = [];
   const leaf = pathLeafToRoot[0];
   const root = pathLeafToRoot[pathLeafToRoot.length - 1];
@@ -295,14 +530,29 @@ export function evaluateConstraints(pathLeafToRoot) {
     }
   }
 
-  if (root && !root.extensions.basicConstraints?.ca) issues.push({ status: 'warning', code: 'root-basic-constraints', cert: root, message: `${getCertificateDisplayName(root)} is supplied as a trust anchor but does not advertise CA=TRUE` });
+  if (root && !root.extensions.basicConstraints?.ca) {
+    issues.push({
+      status: enforceTrustAnchorConstraints ? 'invalid' : 'warning',
+      code: 'root-basic-constraints',
+      cert: root,
+      message: `${getCertificateDisplayName(root)} is supplied as a trust anchor but does not advertise CA=TRUE${enforceTrustAnchorConstraints ? ' (strict supplied-root mode)' : ''}`,
+    });
+  }
+  if (root?.extensions.keyUsage && !root.extensions.keyUsage.usages.includes('keyCertSign')) {
+    issues.push({
+      status: enforceTrustAnchorConstraints ? 'invalid' : 'warning',
+      code: 'root-keycertsign-missing',
+      cert: root,
+      message: `${getCertificateDisplayName(root)} trust-anchor certificate Key Usage does not include keyCertSign${enforceTrustAnchorConstraints ? ' (strict supplied-root mode)' : '; platform trust-anchor metadata may differ'}`,
+    });
+  }
   for (const cert of pathLeafToRoot.slice(0, -1)) {
     if (cert.signatureAlgorithm.weak) issues.push({ status: 'warning', code: 'weak-signature', cert, message: `${getCertificateDisplayName(cert)} uses deprecated ${cert.signatureAlgorithm.name}` });
   }
 
   issues.push(...evaluateStructuralSanity(pathLeafToRoot));
-  issues.push(...evaluateNameConstraints(pathLeafToRoot));
-  issues.push(...evaluatePolicyConstraints(pathLeafToRoot));
+  issues.push(...evaluateNameConstraints(pathLeafToRoot, { enforceTrustAnchorConstraints }));
+  issues.push(...evaluatePolicyConstraints(pathLeafToRoot, { enforceTrustAnchorConstraints }));
   issues.push(...evaluateCriticalExtensions(pathLeafToRoot));
   const invalid = issues.some((issue) => issue.status === 'invalid');
   const unknown = issues.some((issue) => issue.status === 'unknown');
@@ -385,7 +635,7 @@ function pathSortKey(path) {
   return `${String(path.length).padStart(4, '0')}|${path.map((cert) => certId(cert)).join('|')}`;
 }
 
-export async function validateChain({ leaf, intermediates, trustAnchors, bundleCerts = [], now = new Date(), preferredPathIndex = 0 }) {
+export async function validateChain({ leaf, intermediates, trustAnchors, bundleCerts = [], now = new Date(), preferredPathIndex = 0, enforceTrustAnchorConstraints = false }) {
   const certificates = [...trustAnchors, ...intermediates, leaf];
   const inputDiagnostics = analyseInputSet(certificates);
   const graph = await buildCertificateGraph(certificates);
@@ -396,13 +646,13 @@ export async function validateChain({ leaf, intermediates, trustAnchors, bundleC
       graph, paths: [], selectedPath: null, selectedPathIndex: -1, inputDiagnostics,
       chainStatus: { status: 'invalid', valid: false, message: 'No cryptographically valid path reaches the supplied Root CA' },
       missing: diagnoseIncompletePath(graph, leaf, certificates, trustAnchors),
-      trust: { suppliedAnchor: true, osTrustInspected: false, message: 'Validation is against the Root CA supplied to this page. The operating-system/browser trust store is not inspected.' },
+      trust: { suppliedAnchor: true, osTrustInspected: false, enforceTrustAnchorConstraints, message: `Validation is against the Root CA supplied to this page. The operating-system/browser trust store is not inspected. Supplied Root certificate metadata is ${enforceTrustAnchorConstraints ? 'enforced in strict mode' : 'advisory by default'}.` },
     };
   }
 
   const selectedPathIndex = Math.max(0, Math.min(Number(preferredPathIndex) || 0, paths.length - 1));
   const selectedPath = paths[selectedPathIndex];
-  const constraints = evaluateConstraints(selectedPath);
+  const constraints = evaluateConstraints(selectedPath, { enforceTrustAnchorConstraints });
   constraints.issues.unshift(...inputDiagnostics);
   if (graph.cycles.length) constraints.issues.push({ status: 'warning', code: 'issuer-cycle', message: `${graph.cycles.length} circular issuer relationship(s) were detected and ignored during path traversal` });
   if (selectedPath.length >= MAX_SAFE_CHAIN_DEPTH) constraints.issues.push({ status: 'unknown', code: 'depth-cap', message: `Selected path reached the ${MAX_SAFE_CHAIN_DEPTH}-certificate safety cap` });
@@ -416,7 +666,7 @@ export async function validateChain({ leaf, intermediates, trustAnchors, bundleC
   return {
     graph, paths, selectedPath, selectedPathIndex, inputDiagnostics, constraints, time, order, bundle,
     chainStatus: { status: 'valid', valid: true, message: `Certificate signatures form a cryptographically valid path to the supplied Root CA (${selectedPath.length} certificates)` },
-    trust: { suppliedAnchor: true, osTrustInspected: false, message: 'Validation is against the Root CA supplied to this page. The operating-system/browser trust store is not inspected.' },
+    trust: { suppliedAnchor: true, osTrustInspected: false, enforceTrustAnchorConstraints, message: `Validation is against the Root CA supplied to this page. The operating-system/browser trust store is not inspected. Supplied Root certificate metadata is ${enforceTrustAnchorConstraints ? 'enforced in strict mode' : 'advisory by default'}.` },
   };
 }
 

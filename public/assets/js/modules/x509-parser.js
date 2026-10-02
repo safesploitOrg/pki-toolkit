@@ -78,6 +78,7 @@ const EXTENSION_OIDS = Object.freeze({
   NAME_CONSTRAINTS: '2.5.29.30',
   POLICY_CONSTRAINTS: '2.5.29.36',
   INHIBIT_ANY_POLICY: '2.5.29.54',
+  POLICY_MAPPINGS: '2.5.29.33',
 });
 
 function parseAlgorithmIdentifier(node) {
@@ -121,7 +122,7 @@ function parseName(node) {
 
   const attributes = rdns.flat();
   const commonName = attributes.find((a) => a.oid === '2.5.4.3')?.value || null;
-  return { rdns, attributes, display, canonical, commonName };
+  return { rdns, attributes, display, canonical, commonName, der: node.encoded.slice() };
 }
 
 function bitLength(bytes) {
@@ -185,6 +186,41 @@ function parseSubjectPublicKeyInfo(node) {
   return info;
 }
 
+function formatIpv6(bytes) {
+  if (bytes.length !== 16) return bytesToHex(bytes, ':');
+  const groups = [];
+  for (let i = 0; i < 16; i += 2) groups.push(((bytes[i] << 8) | bytes[i + 1]).toString(16));
+
+  // Compress the longest all-zero run for readable, deterministic display.
+  let bestStart = -1;
+  let bestLength = 0;
+  for (let i = 0; i < groups.length;) {
+    if (groups[i] !== '0') { i += 1; continue; }
+    let end = i;
+    while (end < groups.length && groups[end] === '0') end += 1;
+    if (end - i > bestLength && end - i >= 2) {
+      bestStart = i;
+      bestLength = end - i;
+    }
+    i = end;
+  }
+  if (bestStart < 0) return groups.join(':');
+  const left = groups.slice(0, bestStart).join(':');
+  const right = groups.slice(bestStart + bestLength).join(':');
+  return `${left}::${right}`.replace(/^:::/, '::').replace(/:::$/, '::');
+}
+
+function parseDirectoryGeneralName(node) {
+  try {
+    const children = readChildren(node);
+    const nameNode = children.length === 1 ? children[0] : null;
+    if (!nameNode) return { type: 'directoryName', value: null, raw: bytesToHex(node.value) };
+    return { type: 'directoryName', value: parseName(nameNode), raw: bytesToHex(node.value) };
+  } catch {
+    return { type: 'directoryName', value: null, raw: bytesToHex(node.value) };
+  }
+}
+
 function parseGeneralName(node) {
   if (node.tagClass !== TAG_CLASS.CONTEXT) return null;
   const value = node.value;
@@ -193,16 +229,14 @@ function parseGeneralName(node) {
       return { type: 'email', value: new TextDecoder('ascii').decode(value) };
     case 2:
       return { type: 'DNS', value: new TextDecoder('ascii').decode(value) };
+    case 4:
+      return parseDirectoryGeneralName(node);
     case 6:
       return { type: 'URI', value: new TextDecoder('ascii').decode(value) };
     case 7:
-      if (value.length === 4) return { type: 'IP', value: [...value].join('.') };
-      if (value.length === 16) {
-        const groups = [];
-        for (let i = 0; i < 16; i += 2) groups.push(((value[i] << 8) | value[i + 1]).toString(16));
-        return { type: 'IP', value: groups.join(':') };
-      }
-      return { type: 'IP', value: bytesToHex(value, ':') };
+      if (value.length === 4) return { type: 'IP', family: 4, bytes: value.slice(), value: [...value].join('.') };
+      if (value.length === 16) return { type: 'IP', family: 6, bytes: value.slice(), value: formatIpv6(value) };
+      return { type: 'IP', family: null, bytes: value.slice(), value: bytesToHex(value, ':') };
     default:
       return { type: `other[${node.tagNumber}]`, value: bytesToHex(value) };
   }
@@ -319,6 +353,20 @@ function parseCertificatePolicies(inner) {
   return policies;
 }
 
+function parsePolicyMappings(inner) {
+  const seq = readDer(inner);
+  const mappings = [];
+  for (const mapping of readChildren(seq)) {
+    const parts = readChildren(mapping);
+    if (parts.length < 2) continue;
+    mappings.push({
+      issuerDomainPolicy: decodeOid(parts[0]),
+      subjectDomainPolicy: decodeOid(parts[1]),
+    });
+  }
+  return mappings;
+}
+
 function decodeContextInteger(node) {
   if (node.tagClass !== TAG_CLASS.CONTEXT) throw new Error('Expected context-specific INTEGER');
   const bytes = node.value;
@@ -338,6 +386,9 @@ function parseGeneralSubtrees(node) {
     if ([1, 2, 6].includes(base.tagNumber)) {
       const labels = { 1: 'email', 2: 'DNS', 6: 'URI' };
       parsed = { type: labels[base.tagNumber], value: new TextDecoder('ascii').decode(base.value) };
+    } else if (base.tagNumber === 4) {
+      const directory = parseDirectoryGeneralName(base);
+      parsed = { type: 'directoryName', value: directory.value, raw: directory.raw };
     } else if (base.tagNumber === 7) {
       const bytes = base.value;
       if (bytes.length === 8) {
@@ -403,6 +454,7 @@ function blankExtensions() {
     nameConstraints: null,
     policyConstraints: null,
     inhibitAnyPolicy: null,
+    policyMappings: [],
   };
 }
 
@@ -466,6 +518,9 @@ export function parseExtensionSequence(input) {
           break;
         case EXTENSION_OIDS.INHIBIT_ANY_POLICY:
           extensions.inhibitAnyPolicy = parseInhibitAnyPolicy(octet.value);
+          break;
+        case EXTENSION_OIDS.POLICY_MAPPINGS:
+          extensions.policyMappings = parsePolicyMappings(octet.value);
           break;
         default:
           break;

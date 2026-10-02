@@ -197,7 +197,14 @@ async function collectInputs() {
   const bundleCerts = await parsePemCertificates($('#bundle-input').value, 'Existing server bundle', { allowMany: true, required: false });
   bundleCerts.forEach((cert, index) => { cert.inputRole = 'bundle'; cert.inputIndex = index; });
 
-  return { trustAnchors, intermediates, leaf, bundleCerts, hostname: $('#hostname-input').value.trim() };
+  return {
+    trustAnchors,
+    intermediates,
+    leaf,
+    bundleCerts,
+    hostname: $('#hostname-input').value.trim(),
+    enforceTrustAnchorConstraints: $('#strict-root-constraints').checked,
+  };
 }
 
 function showFormError(message) {
@@ -303,6 +310,14 @@ function renderTrustContext(result) {
       </div>
       <p>${escapeHtml(anchorName)}</p>
       <small>SHA-256: <span class="mono">${escapeHtml(fingerprint)}</span></small>
+    </article>
+    <article class="trust-context-item">
+      <div class="trust-context-title">
+        <strong>Supplied Root metadata</strong>
+        <span class="mini-status status-${result.trust?.enforceTrustAnchorConstraints ? 'warning' : 'unknown'}">${result.trust?.enforceTrustAnchorConstraints ? '⚠ Strict' : '? Advisory'}</span>
+      </div>
+      <p>${result.trust?.enforceTrustAnchorConstraints ? 'Basic Constraints, Key Usage, Name Constraints and policy state encoded in the supplied Root are enforced.' : 'Root certificate metadata is advisory. This better reflects platforms that configure trust-anchor constraints separately from the certificate.'}</p>
+      <small>This setting never changes whether the host operating system actually trusts the Root.</small>
     </article>
     <article class="trust-context-item">
       <div class="trust-context-title">
@@ -744,6 +759,23 @@ async function handlePkcs7(event) {
   }
 }
 
+function pkcs12AttributeSummary(attributes) {
+  if (!attributes) return '';
+  const parts = [];
+  if (attributes.friendlyName) parts.push(`friendlyName=${attributes.friendlyName}`);
+  if (attributes.localKeyId) parts.push(`localKeyId=${attributes.localKeyId}`);
+  return parts.join(' · ');
+}
+
+function renderPkcs12Bags(result) {
+  if (!result.bags?.length) return '<p class="muted">No SafeBag inventory available.</p>';
+  return `<ol class="bundle-order-list">${result.bags.map((bag) => {
+    const attr = pkcs12AttributeSummary(bag.attributes);
+    const detail = [bag.family, bag.subject, bag.protectionOid ? `protection=${bag.protectionOid}${bag.supported === false ? ' (unsupported)' : ''}` : '', attr].filter(Boolean).join(' · ');
+    return `<li><strong>${escapeHtml(bag.type)}</strong><small>${escapeHtml(detail || bag.bagId)}</small></li>`;
+  }).join('')}</ol>`;
+}
+
 async function handlePkcs12(event) {
   event.preventDefault();
   const target = $('#pkcs12-result');
@@ -751,15 +783,28 @@ async function handlePkcs12(event) {
     const file = $('#pkcs12-file').files?.[0];
     if (!file) throw new Error('Choose a PKCS#12/PFX file');
     const result = await inspectPkcs12(new Uint8Array(await file.arrayBuffer()), $('#pkcs12-password').value);
-    const keys = result.keys.length ? result.keys.map((key) => `${key.family}${key.curve ? ` ${key.curve}` : ''}${key.encrypted ? ' (encrypted bag)' : ''}`).join(', ') : 'None';
+    const keys = result.keys.length ? result.keys.map((key) => {
+      const attrs = pkcs12AttributeSummary(key.attributes);
+      return `${key.family}${key.curve ? ` ${key.curve}` : ''}${key.encrypted ? ' (encrypted bag)' : ''}${attrs ? ` · ${attrs}` : ''}`;
+    }).join(', ') : 'None';
+    const macStatus = !result.hasMacData
+      ? 'Not present'
+      : result.macVerified === true
+        ? `${result.mac.message} · ${result.mac.iterations} iteration${result.mac.iterations === 1 ? '' : 's'}`
+        : result.macVerified === false
+          ? result.mac.message
+          : result.mac.message || 'Present but algorithm unsupported';
     target.innerHTML = `${detailRows([
       ['PFX version', String(result.version)],
       ['Certificates', String(result.certificates.length)],
       ['Private keys', String(result.keys.length)],
-      ['Key types', keys],
-      ['MAC present', result.hasMacData ? 'Yes (integrity MAC presence detected; MAC verification is not claimed)' : 'No'],
+      ['Key types / attributes', keys],
+      ['Integrity MAC', macStatus],
+      ['MAC salt', result.mac?.salt || '—', true],
+      ['Legacy PKCS#12 protection', result.legacyProtectionDetected ? 'Detected — identified only; legacy decryption is not attempted' : 'Not detected'],
+      ['Unsupported algorithms', result.unsupportedAlgorithms?.length ? result.unsupportedAlgorithms.join(', ') : 'None'],
       ['Unsupported content types', result.unsupportedContentTypes.length ? result.unsupportedContentTypes.join(', ') : 'None'],
-    ])}${renderCertificateInventory(result.certificates)}`;
+    ])}<h3>SafeBag inventory</h3>${renderPkcs12Bags(result)}<h3>Certificates</h3>${renderCertificateInventory(result.certificates)}`;
     $('#pkcs12-password').value = '';
   } catch (error) {
     target.innerHTML = `<div class="notice error">${escapeHtml(error?.message || String(error))}</div>`;
@@ -780,15 +825,29 @@ async function handleCrl(event) {
     const [issuer] = await parsePemCertificates($('#crl-issuer-input').value, 'CRL issuer certificate', { allowMany: false, required: true });
     const certs = await parsePemCertificates($('#crl-cert-input').value, 'Certificate to check', { allowMany: false, required: false });
     const checked = certs[0] || null;
-    const result = await validateCrl(crl, issuer, checked);
-    const certStatus = !checked ? 'Not checked' : result.certificateStatus?.revoked ? `REVOKED · ${result.certificateStatus.entry.revocationDate.toISOString()}` : 'Not listed in this CRL';
+    const baseText = $('#crl-base-input').value.trim();
+    const baseCrl = baseText ? parseCrlText(baseText) : null;
+    const result = await validateCrl(crl, issuer, checked, new Date(), { baseCrl });
+    const certStatus = !checked
+      ? 'Not checked'
+      : result.certificateStatus?.revoked === true
+        ? `REVOKED · ${result.certificateStatus.entry.revocationDate.toISOString()} · ${result.certificateStatus.entry.reason || 'reason unspecified'}`
+        : result.certificateStatus?.revoked === false
+          ? `${result.certificateStatus.status}${result.certificateStatus.conclusive ? ' · conclusive for this CRL scope' : ' · partial scope / not conclusive'}`
+          : result.certificateStatus?.status || 'Indeterminate';
+    const idp = crl.issuingDistributionPoint;
     target.innerHTML = detailRows([
       ['Issuer', crl.issuer.display],
       ['This Update', crl.thisUpdate.toISOString()],
       ['Next Update', crl.nextUpdate?.toISOString() || 'Not present'],
+      ['CRL number', crl.crlNumber === null ? 'Not present' : String(crl.crlNumber)],
+      ['Delta CRL', crl.deltaCrlIndicator === null ? 'No' : `Yes · base CRL number ${crl.deltaCrlIndicator} or earlier required`],
+      ['Indirect CRL', idp?.indirectCRL ? 'Yes' : 'No'],
+      ['Reason scope', idp?.onlySomeReasons?.length ? idp.onlySomeReasons.join(', ') : 'All reasons / not restricted'],
       ['Revoked entries', String(crl.revoked.length)],
       ['CRL signature', result.signature.message],
-      ['Freshness', result.stale === true ? 'Stale / nextUpdate passed' : result.stale === false ? 'Within nextUpdate window' : 'No nextUpdate'],
+      ['Freshness', result.notYetValid ? 'CRL thisUpdate is in the future' : result.stale === true ? 'Stale / nextUpdate passed' : result.stale === false ? 'Within nextUpdate window' : 'No nextUpdate'],
+      ['Base/delta compatibility', crl.deltaCrlIndicator === null ? 'Not applicable' : result.deltaCompatible ? 'Compatible base CRL supplied' : 'Missing or incompatible base CRL'],
       ['Certificate status', certStatus],
     ]);
   } catch (error) {
@@ -813,7 +872,15 @@ async function handleOcsp(event) {
     const [issuer] = await parsePemCertificates($('#ocsp-issuer-input').value, 'OCSP issuer certificate', { allowMany: false, required: true });
     const certs = await parsePemCertificates($('#ocsp-cert-input').value, 'Certificate to check', { allowMany: false, required: false });
     const checked = certs[0] || null;
-    const result = await validateOcspResponse(ocsp, issuer, checked);
+    const skewSeconds = Math.max(0, Number($('#ocsp-clock-skew').value || 300));
+    const maxAgeHoursText = $('#ocsp-max-age').value.trim();
+    const maxAgeMs = maxAgeHoursText ? Math.max(0, Number(maxAgeHoursText)) * 60 * 60 * 1000 : null;
+    const expectedNonce = $('#ocsp-expected-nonce').value.trim() || null;
+    const result = await validateOcspResponse(ocsp, issuer, checked, new Date(), {
+      clockSkewMs: skewSeconds * 1000,
+      maxAgeMs,
+      expectedNonce,
+    });
     const single = result.single;
     target.innerHTML = detailRows([
       ['OCSP response status', String(ocsp.responseStatus)],
@@ -821,10 +888,14 @@ async function handleOcsp(event) {
       ['Response entries', String(ocsp.basic?.responses?.length || 0)],
       ['Signer', result.signer ? getCertificateDisplayName(result.signer) : 'Unavailable'],
       ['Signature', result.signature?.message || result.message || 'Not verified'],
-      ['Delegated signer', result.delegated ? (result.authorised ? 'Yes · OCSP Signing EKU present' : 'Yes · not authorised by EKU') : 'No / issuer signed'],
-      ['Certificate status', single ? single.certStatus.toUpperCase() : checked ? 'No matching SingleResponse' : 'Not checked'],
+      ['Delegated signer', result.delegated ? (result.authorised ? 'Yes · directly issued by CA + OCSP Signing EKU' : 'Yes · authorisation validation failed') : 'No / issuer signed'],
+      ['Signer time at producedAt', result.signerTimeValid === undefined ? 'Not checked' : result.signerTimeValid ? 'Valid' : 'Outside signer certificate validity'],
+      ['CertID issuer hashes', result.certIdValidation?.message || (checked ? 'No matching CertID' : 'Not checked')],
+      ['Certificate status', single ? `${single.certStatus.toUpperCase()}${single.revocationReason ? ` · ${single.revocationReason.name}` : ''}` : checked ? 'No matching SingleResponse' : 'Not checked'],
       ['This Update', single?.thisUpdate?.toISOString() || '—'],
       ['Next Update', single?.nextUpdate?.toISOString() || '—'],
+      ['Freshness policy', result.producedAtFuture ? 'producedAt is too far in the future' : result.producedAtTooOld ? 'Response exceeds configured maximum age' : result.stale ? 'nextUpdate is stale' : result.future ? 'thisUpdate is too far in the future' : 'Within configured policy'],
+      ['Nonce', result.nonce?.message || 'Not evaluated'],
     ]);
   } catch (error) {
     target.innerHTML = `<div class="notice error">${escapeHtml(error?.message || String(error))}</div>`;

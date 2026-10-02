@@ -52,3 +52,14 @@ test('basic accessibility and footer/repository affordances exist', async ({ pag
   await expect(page.locator('.footer-repo')).toHaveAttribute('href', 'https://github.com/safesploitOrg/pki-toolkit');
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', './assets/images/favicon/certificate-96x96.png');
 });
+
+test('has no serious or critical axe violations on primary routes', async ({ page }) => {
+  const { default: AxeBuilder } = await import('@axe-core/playwright');
+  const routes = ['certificate', 'privatekey', 'csr', 'formats', 'revocation', 'commands'];
+  for (const route of routes) {
+    await page.goto(`/#${route}`);
+    const results = await new AxeBuilder({ page }).analyze();
+    const blocking = results.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact));
+    expect(blocking, `${route} accessibility violations:\n${blocking.map((v) => `${v.id}: ${v.help}`).join('\n')}`).toEqual([]);
+  }
+});
