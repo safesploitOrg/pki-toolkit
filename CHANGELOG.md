@@ -4,6 +4,15 @@ All notable changes to PKI Toolkit are documented here.
 
 The project is still pre-1.0; APIs and UI details may change while the parser and validation model are hardened.
 
+## [0.6.0-alpha.2] - 2026-10-04
+
+### Fixed
+
+- Separated RFC 5280 extension-profile conformance checks from RFC 5280/RFC 9618 policy-processing semantics.
+- Fixed the NIST PKITS policy adapter so sections 4.8-4.12 are compared on the same basis as the pinned corpus harness; historical non-critical Policy Constraints / Inhibit anyPolicy extensions no longer create false policy-semantic failures.
+- Normal browser/application validation remains strict and still rejects non-critical Policy Constraints and Inhibit anyPolicy under the RFC 5280 profile.
+- Added a regression test proving policy-only corpus mode cannot silently weaken normal application validation.
+
 ## [0.6.0-alpha.1] - 2026-10-03
 
 ### Stage 0 — stabilisation

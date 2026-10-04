@@ -219,7 +219,7 @@ function extCritical(cert, oid) {
   return cert?.extensions?.raw?.find((ext) => ext.oid === oid)?.critical ?? null;
 }
 
-function structuralPolicyIssues(pathCertificates) {
+function structuralPolicyIssues(pathCertificates, { enforceExtensionProfile = true } = {}) {
   const issues = [];
   for (let index = 0; index < pathCertificates.length; index += 1) {
     const cert = pathCertificates[index];
@@ -276,7 +276,7 @@ function structuralPolicyIssues(pathCertificates) {
         message: 'Policy Constraints is present but contains neither requireExplicitPolicy nor inhibitPolicyMapping',
       });
     }
-    if (constraints && extCritical(cert, '2.5.29.36') === false) {
+    if (enforceExtensionProfile && constraints && extCritical(cert, '2.5.29.36') === false) {
       issues.push({
         status: 'invalid',
         code: 'policy-constraints-not-critical',
@@ -284,7 +284,7 @@ function structuralPolicyIssues(pathCertificates) {
         message: 'RFC 5280 requires Policy Constraints to be marked critical',
       });
     }
-    if (cert?.extensions?.inhibitAnyPolicy !== null && cert?.extensions?.inhibitAnyPolicy !== undefined && extCritical(cert, '2.5.29.54') === false) {
+    if (enforceExtensionProfile && cert?.extensions?.inhibitAnyPolicy !== null && cert?.extensions?.inhibitAnyPolicy !== undefined && extCritical(cert, '2.5.29.54') === false) {
       issues.push({
         status: 'invalid',
         code: 'inhibit-any-policy-not-critical',
@@ -455,7 +455,7 @@ export function evaluatePolicyGraph(pathLeafToRoot, options = {}) {
   let inhibitAnyPolicy = options.initialAnyPolicyInhibit ? 0 : n + 1;
   let graph = new PolicyGraph();
 
-  issues.push(...structuralPolicyIssues(pathCertificates));
+  issues.push(...structuralPolicyIssues(pathCertificates, { enforceExtensionProfile: options.enforceExtensionProfile !== false }));
 
   for (let index = 0; index < n; index += 1) {
     const cert = pathCertificates[index];

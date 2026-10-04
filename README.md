@@ -156,3 +156,7 @@ The certificate favicon supplied for the project is credited to Icons8 in the pu
 - [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md)
 - [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
 - [`CHANGELOG.md`](CHANGELOG.md)
+
+### NIST PKITS policy corpus semantics
+
+`npm run test:pkits` validates policy-processing semantics against the pinned NIST PKITS 4.8-4.12 vectors. The adapter intentionally excludes unrelated extension-profile criticality checks because the reference PKITS policy harness invokes the policy algorithm directly. Normal browser/application validation keeps those RFC 5280 profile checks enabled.

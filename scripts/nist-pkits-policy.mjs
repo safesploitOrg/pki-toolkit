@@ -138,6 +138,12 @@ async function main() {
         initialPolicyMappingInhibit: Boolean(vector.InitialPolicyMappingInhibit),
         initialExplicitPolicy: Boolean(vector.InitialExplicitPolicy),
         initialAnyPolicyInhibit: Boolean(vector.InitialAnyPolicyInhibit),
+        // The pinned PKITS policy harness exercises the policy-processing
+        // algorithm directly. It does not apply unrelated extension-profile
+        // checks such as the critical bit on Policy Constraints. Keep those
+        // checks enabled in normal application validation, but exclude them
+        // from this policy-semantics corpus adapter.
+        enforceExtensionProfile: false,
       });
       const actual = Boolean(result.valid);
       const expected = Boolean(vector.ShouldValidate);

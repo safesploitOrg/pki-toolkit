@@ -1,6 +1,6 @@
 {
   "name": "pki-toolkit",
-  "version": "0.6.0-alpha.1",
+  "version": "0.6.0-alpha.2",
   "private": true,
   "description": "Browser-only PKI toolkit for X.509 chain validation, private-key matching, CSR inspection, certificate containers and revocation evidence.",
   "type": "module",

@@ -173,6 +173,29 @@ test('policy graph remains linear under Cartesian mapping topologies', () => {
   for (const stratum of result.graph.slice(1)) assert.ok(stratum.length <= 2);
 });
 
+test('policy-only corpus mode ignores profile criticality without weakening application mode', () => {
+  const intermediate = cert('intermediate', [POLICY_A], {
+    policyConstraints: { requireExplicitPolicy: 0, inhibitPolicyMapping: null },
+    policyConstraintsCritical: false,
+    inhibitAnyPolicy: 0,
+    inhibitAnyPolicyCritical: false,
+  });
+  const leaf = cert('leaf', [POLICY_A]);
+  const strict = evaluatePolicyGraph([leaf, intermediate, root()], {
+    userInitialPolicySet: [POLICY_A],
+  });
+  const policyOnly = evaluatePolicyGraph([leaf, intermediate, root()], {
+    userInitialPolicySet: [POLICY_A],
+    enforceExtensionProfile: false,
+  });
+  assert.equal(strict.valid, false);
+  assert.ok(strict.issues.some((issue) => issue.code === 'policy-constraints-not-critical'));
+  assert.ok(strict.issues.some((issue) => issue.code === 'inhibit-any-policy-not-critical'));
+  assert.equal(policyOnly.valid, true);
+  assert.ok(!policyOnly.issues.some((issue) => issue.code === 'policy-constraints-not-critical'));
+  assert.ok(!policyOnly.issues.some((issue) => issue.code === 'inhibit-any-policy-not-critical'));
+});
+
 test('policy profile rejects non-critical Policy Constraints and Inhibit anyPolicy', () => {
   const intermediate = cert('intermediate', [POLICY_A], {
     policyConstraints: { requireExplicitPolicy: 0, inhibitPolicyMapping: null },
