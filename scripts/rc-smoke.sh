@@ -30,13 +30,14 @@ test -f THIRD_PARTY_NOTICES.md
 printf '%s\n' '[5/5] Optional external differential checks'
 if [[ "${PKI_RUN_EXTERNAL:-0}" == '1' ]]; then
   npm run test:pkijs
+  npm run test:pkits
   if [[ -n "${X509_LIMBO_JSON:-}" ]]; then
     npm run test:limbo
   else
     echo 'PKI_RUN_EXTERNAL=1 but X509_LIMBO_JSON is unset; skipping x509-limbo.'
   fi
 else
-  echo 'External PKI.js/x509-limbo checks are CI-oriented. Set PKI_RUN_EXTERNAL=1 to run them locally after installing their pinned test-only dependencies.'
+  echo 'External PKI.js/NIST-PKITS/x509-limbo checks are CI-oriented. Set PKI_RUN_EXTERNAL=1 to run them locally after installing their pinned test-only dependencies.'
 fi
 
 printf '%s\n' 'Release-candidate smoke checks passed.'

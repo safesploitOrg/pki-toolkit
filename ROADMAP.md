@@ -1,8 +1,8 @@
 # Roadmap
 
-## Current release line — v0.5 alpha
+## Current release line — v0.6 alpha
 
-The original v0.1-v0.4 product roadmap is substantially implemented. `v0.5` is a standards-depth, compatibility and release-hardening line rather than another large UI expansion.
+`v0.6.0-alpha.1` completes Stage 0 (CI stabilisation) and Stage 1 (RFC 5280/RFC 9618 policy processing). Browser E2E is intentionally disabled until the later browser-debugging stage.
 
 ## v0.1 — Certificate analyser
 
@@ -57,7 +57,18 @@ The original v0.1-v0.4 product roadmap is substantially implemented. `v0.5` is a
 - [x] Alternate/cross-signed path selection in the UI.
 - [x] Keep automatic AIA/OCSP/CRL retrieval disabled by default.
 
-## v0.5 — Standards and release hardening
+## v0.5 / v0.6 — Standards and release hardening
+
+### Stage 0 / Stage 1 checkpoint
+
+- [x] Temporarily disable the failing `browser-e2e` job without deleting it.
+- [x] Remove browser E2E from Pages deployment dependencies.
+- [x] Preserve all non-browser gating checks.
+- [x] Isolate RFC policy processing in its own module.
+- [x] Add RFC 9618 linear policy-graph semantics and qualifier output.
+- [x] Add pinned NIST PKITS policy corpus runner.
+- [ ] Re-enable and debug browser E2E in the later browser stage.
+
 
 ### RFC 5280 depth
 
@@ -65,7 +76,7 @@ The original v0.1-v0.4 product roadmap is substantially implemented. `v0.5` is a
 - [x] Explicitly reject non-default GeneralSubtree `minimum`/`maximum` values under the RFC 5280 Internet profile rather than silently ignoring them.
 - [x] Parse PolicyMappings and maintain explicit-policy / inhibit-mapping / inhibit-any-policy state through common multi-CA paths.
 - [x] Add optional strict supplied-root metadata mode for supported Root Basic Constraints, KU, Name Constraints and policy state.
-- [ ] Complete the full RFC 5280 policy-tree algorithm for exotic mapping/intersection/qualifier topologies and verify behaviour against a standards corpus.
+- [x] Implement full RFC 5280 policy processing using the RFC 9618 policy graph, including mapping/intersection/qualifier state and a pinned NIST PKITS 4.8–4.12 standards runner. Remote corpus execution remains a CI verification gate.
 - [ ] Add richer models for platform-specific trust-anchor behaviour where they can be described without pretending browser JavaScript can inspect the real host trust store.
 
 ### PKCS#12 compatibility

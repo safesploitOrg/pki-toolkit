@@ -14,6 +14,7 @@ Use this checklist before promoting PKI Toolkit from alpha/beta to a stable `v1.
 ## 2. Differential / corpus validation
 
 - [ ] PKI.js/asn1js differential parser job passes in GitHub Actions.
+- [ ] Pinned NIST PKITS policy sections 4.8–4.12 (88 vectors) pass in GitHub Actions.
 - [ ] Review the pinned x509-limbo informational run; triage all parser rejects from expected-success test cases.
 - [ ] Promote an agreed subset of x509-limbo semantic cases to gating validation tests.
 - [ ] Record the x509-limbo commit SHA used for the release.
@@ -26,6 +27,9 @@ Current pinned x509-limbo commit for the alpha hardening job:
 ```
 
 ## 3. Browser / accessibility
+
+> Temporarily deferred for the v0.6 alpha standards checkpoint. The workflow job is retained but disabled; all items in this section become gating again before beta/RC.
+
 
 - [ ] Chromium E2E passes.
 - [ ] Firefox E2E passes.

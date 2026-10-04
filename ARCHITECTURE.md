@@ -146,7 +146,11 @@ Implemented/conservatively modelled:
 - malformed wildcard SANs;
 - very large SAN warnings.
 
-The policy engine is deliberately conservative. It does not yet claim the complete RFC 5280 policy-tree algorithm for every qualifier/mapping/intersection topology. Complex cases that cannot be proven are reported as indeterminate.
+Policy processing is isolated in `policy-tree.js`. It implements RFC 5280 path-policy processing using the RFC 9618 `valid_policy_graph` replacement rather than materialising the legacy exponential `valid_policy_tree`. The graph keeps at most one node per policy OID per depth, supports multiple parents, tracks expected-policy sets and qualifier sets, and outputs authority-constrained/user-constrained policy sets.
+
+The trust anchor is excluded from certification-path policy processing. Self-issued intermediate certificates do not consume the relevant policy/path-length counters. CPS Pointer and User Notice qualifiers are preserved for output; unknown qualifiers in a critical Certificate Policies extension are rejected rather than silently treated as understood.
+
+A pinned NIST PKITS runner exercises policy sections 4.8–4.12 in CI. The corpus is test-only and is not part of the deployed application.
 
 ## 8. Private-key architecture
 

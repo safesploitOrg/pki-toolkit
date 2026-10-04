@@ -8,3 +8,6 @@ test-results/
 # Generated disposable PKI fixtures. CI and developers regenerate these with
 # `npm run fixtures`; never commit generated private keys or PKCS#12 files.
 tests/fixtures/
+
+# Downloaded standards corpora used by CI/local opt-in tests.
+tests/.cache/

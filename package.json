@@ -1,6 +1,6 @@
 {
   "name": "pki-toolkit",
-  "version": "0.5.0-alpha.1",
+  "version": "0.6.0-alpha.1",
   "private": true,
   "description": "Browser-only PKI toolkit for X.509 chain validation, private-key matching, CSR inspection, certificate containers and revocation evidence.",
   "type": "module",
@@ -12,6 +12,8 @@
     "fixtures": "bash scripts/generate-test-pki.sh",
     "test:differential": "bash scripts/openssl-differential.sh",
     "test:pkijs": "node scripts/pkijs-differential.mjs",
+    "test:pkits": "node scripts/nist-pkits-policy.mjs",
+    "test:standards": "npm run test:pkits",
     "test:fuzz": "node scripts/parser-fuzz.mjs",
     "test:limbo": "node scripts/x509-limbo-smoke.mjs",
     "test:browser": "playwright test",

@@ -3,6 +3,7 @@ import { verifyCertificateSignature } from './crypto.js';
 import { getCaIssuerUris, getCertificateDisplayName, OIDS } from './x509-parser.js';
 import { evaluatePathTime } from './time-validation.js';
 import { validateSanSyntax } from './hostname.js';
+import { evaluatePolicyGraph } from './policy-tree.js';
 
 const MAX_SAFE_CHAIN_DEPTH = 64;
 const SAN_WARNING_THRESHOLD = 100;
@@ -347,111 +348,6 @@ function evaluateNameConstraints(path, { enforceTrustAnchorConstraints = false }
   return issues;
 }
 
-function minCounter(current, value) {
-  if (value === null || value === undefined) return current;
-  return Math.min(current, Number(value));
-}
-
-function decrementPolicyCounter(value, cert) {
-  if (!Number.isFinite(value)) return value;
-  if (cert?.selfIssued) return value;
-  return Math.max(0, value - 1);
-}
-
-/**
- * Stateful RFC 5280 policy processing for the common Internet-PKI cases.
- * This models explicit-policy, inhibit-any-policy and policy-mapping counters,
- * including PolicyMappings transitions. It intentionally does not claim the
- * full RFC policy-tree/qualifier algorithm for every exotic mapping topology.
- */
-function evaluatePolicyConstraints(path, { enforceTrustAnchorConstraints = false } = {}) {
-  const issues = [];
-  let explicitPolicy = Number.POSITIVE_INFINITY;
-  let inhibitPolicyMapping = Number.POSITIVE_INFINITY;
-  let inhibitAnyPolicy = Number.POSITIVE_INFINITY;
-  let expectedPolicies = null; // null means unconstrained/any policy at this point.
-  let policyTreeIndeterminate = false;
-
-  const processing = path.slice(0, -1).reverse(); // highest intermediate -> leaf
-  if (enforceTrustAnchorConstraints && path.length) processing.unshift(path.at(-1));
-
-  processing.forEach((cert, index) => {
-    const isLeaf = cert === path[0];
-    const policies = new Set(cert.extensions.certificatePolicies || []);
-    const hasAny = policies.has(ANY_POLICY);
-    const specific = new Set([...policies].filter((oid) => oid !== ANY_POLICY));
-
-    if (explicitPolicy === 0 && !policies.size) {
-      issues.push({ status: 'invalid', code: 'explicit-policy-required', cert, message: `${getCertificateDisplayName(cert)} has no Certificate Policies extension while explicit policy is required` });
-    }
-
-    if (expectedPolicies !== null) {
-      const next = new Set([...specific].filter((oid) => expectedPolicies.has(oid)));
-      if (hasAny && inhibitAnyPolicy > 0) {
-        for (const oid of expectedPolicies) next.add(oid);
-      }
-      if (!next.size && policies.size && !(hasAny && inhibitAnyPolicy > 0)) {
-        if (explicitPolicy === 0 || isLeaf) {
-          issues.push({ status: 'invalid', code: 'policy-tree-empty', cert, message: `${getCertificateDisplayName(cert)} does not assert a policy that remains valid on this certification path` });
-        } else {
-          policyTreeIndeterminate = true;
-        }
-      }
-      expectedPolicies = next.size ? next : expectedPolicies;
-    } else if (specific.size) {
-      expectedPolicies = specific;
-    } else if (hasAny && inhibitAnyPolicy === 0) {
-      issues.push({ status: 'invalid', code: 'any-policy-inhibited', cert, message: `${getCertificateDisplayName(cert)} relies on anyPolicy after anyPolicy has been inhibited` });
-    }
-
-    const mappings = cert.extensions.policyMappings || [];
-    for (const mapping of mappings) {
-      if (mapping.issuerDomainPolicy === ANY_POLICY || mapping.subjectDomainPolicy === ANY_POLICY) {
-        issues.push({ status: 'invalid', code: 'any-policy-mapping', cert, message: `${getCertificateDisplayName(cert)} contains a PolicyMappings entry involving anyPolicy, which RFC 5280 forbids` });
-      }
-    }
-    if (!isLeaf && mappings.length) {
-      if (inhibitPolicyMapping === 0) {
-        if (expectedPolicies && mappings.some((mapping) => expectedPolicies.has(mapping.issuerDomainPolicy))) {
-          issues.push({ status: 'invalid', code: 'policy-mapping-inhibited', cert, message: `${getCertificateDisplayName(cert)} requires a policy mapping after policy mapping has been inhibited` });
-        }
-      } else if (expectedPolicies) {
-        const mapped = new Set(expectedPolicies);
-        for (const mapping of mappings) {
-          if (expectedPolicies.has(mapping.issuerDomainPolicy)) {
-            mapped.delete(mapping.issuerDomainPolicy);
-            mapped.add(mapping.subjectDomainPolicy);
-          }
-        }
-        expectedPolicies = mapped;
-      }
-    }
-
-    if (!isLeaf) {
-      const pc = cert.extensions.policyConstraints;
-      explicitPolicy = minCounter(explicitPolicy, pc?.requireExplicitPolicy);
-      inhibitPolicyMapping = minCounter(inhibitPolicyMapping, pc?.inhibitPolicyMapping);
-      inhibitAnyPolicy = minCounter(inhibitAnyPolicy, cert.extensions.inhibitAnyPolicy);
-    }
-
-    const nextCert = processing[index + 1];
-    if (nextCert) {
-      explicitPolicy = decrementPolicyCounter(explicitPolicy, nextCert);
-      inhibitPolicyMapping = decrementPolicyCounter(inhibitPolicyMapping, nextCert);
-      inhibitAnyPolicy = decrementPolicyCounter(inhibitAnyPolicy, nextCert);
-    }
-  });
-
-  if (policyTreeIndeterminate && !issues.some((issue) => issue.status === 'invalid')) {
-    issues.push({
-      status: 'unknown',
-      code: 'policy-tree-complex',
-      message: 'Certificate policy processing encountered a mapping/intersection case that cannot be proven valid by the current policy-state engine',
-    });
-  }
-  return issues;
-}
-
 function evaluateCriticalExtensions(path) {
   const issues = [];
   for (const cert of path.slice(0, -1)) {
@@ -494,7 +390,8 @@ function evaluateStructuralSanity(path) {
   return issues;
 }
 
-export function evaluateConstraints(pathLeafToRoot, { enforceTrustAnchorConstraints = false } = {}) {
+export function evaluateConstraints(pathLeafToRoot, options = {}) {
+  const { enforceTrustAnchorConstraints = false } = options;
   const issues = [];
   const leaf = pathLeafToRoot[0];
   const root = pathLeafToRoot[pathLeafToRoot.length - 1];
@@ -525,8 +422,11 @@ export function evaluateConstraints(pathLeafToRoot, { enforceTrustAnchorConstrai
       }
     }
     if (basic?.pathLen !== null && basic?.pathLen !== undefined) {
-      const subordinateCaCount = i - 1;
-      if (subordinateCaCount > basic.pathLen) issues.push({ status: 'invalid', code: 'pathlen-exceeded', cert: ca, message: `${getCertificateDisplayName(ca)} pathLenConstraint=${basic.pathLen} is exceeded by ${subordinateCaCount} subordinate CA certificate(s)` });
+      const subordinateCaCount = pathLeafToRoot
+        .slice(1, i)
+        .filter((subordinate) => subordinate.extensions.basicConstraints?.ca && !subordinate.selfIssued)
+        .length;
+      if (subordinateCaCount > basic.pathLen) issues.push({ status: 'invalid', code: 'pathlen-exceeded', cert: ca, message: `${getCertificateDisplayName(ca)} pathLenConstraint=${basic.pathLen} is exceeded by ${subordinateCaCount} non-self-issued subordinate CA certificate(s)` });
     }
   }
 
@@ -552,11 +452,17 @@ export function evaluateConstraints(pathLeafToRoot, { enforceTrustAnchorConstrai
 
   issues.push(...evaluateStructuralSanity(pathLeafToRoot));
   issues.push(...evaluateNameConstraints(pathLeafToRoot, { enforceTrustAnchorConstraints }));
-  issues.push(...evaluatePolicyConstraints(pathLeafToRoot, { enforceTrustAnchorConstraints }));
+  const policy = evaluatePolicyGraph(pathLeafToRoot, {
+    userInitialPolicySet: options.userInitialPolicySet,
+    initialExplicitPolicy: Boolean(options.initialExplicitPolicy),
+    initialPolicyMappingInhibit: Boolean(options.initialPolicyMappingInhibit),
+    initialAnyPolicyInhibit: Boolean(options.initialAnyPolicyInhibit),
+  });
+  issues.push(...policy.issues);
   issues.push(...evaluateCriticalExtensions(pathLeafToRoot));
   const invalid = issues.some((issue) => issue.status === 'invalid');
   const unknown = issues.some((issue) => issue.status === 'unknown');
-  return { issues, valid: invalid ? false : unknown ? null : true };
+  return { issues, valid: invalid ? false : unknown ? null : true, policy };
 }
 
 export function analyseInputSet(certificates) {

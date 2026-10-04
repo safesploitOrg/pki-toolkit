@@ -8,7 +8,7 @@ Repository: https://github.com/safesploitOrg/pki-toolkit
 
 ## Current release line
 
-`v0.5.0-alpha.1` focuses on standards-depth and release hardening after the original v0.1-v0.4 feature roadmap.
+`v0.6.0-alpha.1` is the Stage 0/1 standards checkpoint: CI is stabilised and certificate-policy processing now follows RFC 5280 as updated by RFC 9618.
 
 The project is still pre-1.0. A green result is intended to be useful and conservative, but the application does not claim universal RFC 5280/WebPKI equivalence yet. Unsupported critical semantics are reported as indeterminate rather than silently accepted.
 
@@ -27,7 +27,7 @@ The project is still pre-1.0. A green result is intended to be useful and conser
 - Basic Constraints, KU, EKU and `pathLenConstraint` checks.
 - Name Constraints for DNS, IPv4, IPv6, `rfc822Name`, URI and `directoryName` within the RFC 5280 Internet profile.
 - Non-default GeneralSubtree `minimum`/`maximum` values are rejected rather than silently interpreted outside the Internet profile.
-- Certificate Policies inventory, policy counters and common multi-CA PolicyMappings processing.
+- RFC 5280 certificate-policy processing using the RFC 9618 linear policy graph: `anyPolicy`, explicit-policy, mapping and inhibition counters, multi-parent mappings/intersections, self-issued handling, and policy qualifiers.
 - Optional **strict supplied-root metadata** mode for Root Basic Constraints, KU, Name Constraints and policy state.
 - Missing-intermediate diagnosis with AIA CA Issuers hints; URLs are never fetched automatically.
 - SHA-256/SHA-1 certificate fingerprints and SHA-256 SPKI fingerprints.
@@ -124,9 +124,9 @@ Test certificates, CRLs, OCSP responses, CSRs, private keys and PKCS#12 files ar
 GitHub Actions separates the checks into several layers:
 
 1. **Core:** fixture generation, syntax, unit tests, OpenSSL differential checks, deterministic parser fuzzing and static no-network/CSP assertions.
-2. **Standards hardening:** pinned PKI.js/asn1js differential parsing plus a pinned C2SP `x509-limbo` corpus smoke. The Limbo corpus is informational while the project is alpha; PKI.js differential checks are gating.
-3. **Browser E2E:** Chromium, Firefox and WebKit, plus the configured mobile viewport.
-4. **Accessibility:** axe scans primary routes for serious/critical violations as part of browser CI.
+2. **Standards hardening:** pinned PKI.js/asn1js differential parsing, a pinned NIST PKITS policy suite (sections 4.8–4.12), plus a pinned C2SP `x509-limbo` parser smoke.
+3. **Browser E2E:** the Playwright job is retained but temporarily disabled for the v0.6 alpha standards line; it will be debugged/re-enabled before beta/RC.
+4. **Accessibility:** axe remains part of the retained browser suite and resumes when browser E2E is re-enabled.
 
 External test-only packages are installed only inside CI. The deployed static application retains zero runtime package dependencies.
 

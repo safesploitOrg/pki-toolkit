@@ -77,7 +77,9 @@ Defences include:
 - explicit unsupported-algorithm states rather than fallbacks;
 - deterministic mutation fuzz testing;
 - OpenSSL and PKI.js differential testing;
-- pinned x509-limbo external-corpus smoke in CI.
+- pinned x509-limbo external-corpus smoke in CI;
+- pinned NIST PKITS policy-validation corpus (sections 4.8–4.12) in CI;
+- RFC 9618 linear policy-graph processing to avoid the exponential policy-tree denial-of-service class.
 
 All certificate-derived strings inserted into HTML are escaped by the UI.
 

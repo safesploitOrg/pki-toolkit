@@ -343,14 +343,60 @@ function parseCrlDistributionPoints(inner) {
   return collectContextUris(seq);
 }
 
+function parsePolicyQualifier(qualifierNode) {
+  const parts = readChildren(qualifierNode);
+  if (parts.length < 2) throw new Error('Malformed PolicyQualifierInfo');
+  const oid = decodeOid(parts[0]);
+  const valueNode = parts[1];
+  const result = {
+    oid,
+    raw: bytesToHex(valueNode.encoded),
+  };
+
+  // id-qt-cps: CPSuri ::= IA5String
+  if (oid === '1.3.6.1.5.5.7.2.1') {
+    result.kind = 'cps';
+    result.value = decodeString(valueNode);
+    return result;
+  }
+
+  // id-qt-unotice: preserve the complete DER and expose explicitText when
+  // present. Policy validation carries qualifiers without interpreting their
+  // application-specific semantics.
+  if (oid === '1.3.6.1.5.5.7.2.2') {
+    result.kind = 'userNotice';
+    try {
+      const noticeParts = readChildren(valueNode);
+      const explicitText = noticeParts.find((part) => part.tagClass === TAG_CLASS.UNIVERSAL && [12, 18, 19, 20, 22, 26, 30].includes(part.tagNumber));
+      if (explicitText) result.explicitText = decodeString(explicitText);
+    } catch {
+      // The raw DER remains available even when the optional presentation
+      // fields cannot be rendered.
+    }
+    return result;
+  }
+
+  result.kind = 'unknown';
+  return result;
+}
+
 function parseCertificatePolicies(inner) {
   const seq = readDer(inner);
-  const policies = [];
+  const info = [];
   for (const policyInfo of readChildren(seq)) {
     const parts = readChildren(policyInfo);
-    if (parts[0]) policies.push(decodeOid(parts[0]));
+    if (!parts[0]) continue;
+    const oid = decodeOid(parts[0]);
+    const qualifiers = [];
+    if (parts[1]) {
+      for (const qualifier of readChildren(parts[1])) qualifiers.push(parsePolicyQualifier(qualifier));
+    }
+    info.push({ oid, qualifiers });
   }
-  return policies;
+  return {
+    oids: info.map((entry) => entry.oid),
+    info,
+  };
 }
 
 function parsePolicyMappings(inner) {
@@ -451,6 +497,7 @@ function blankExtensions() {
     authorityInfoAccess: [],
     crlDistributionPoints: [],
     certificatePolicies: [],
+    certificatePolicyInfo: [],
     nameConstraints: null,
     policyConstraints: null,
     inhibitAnyPolicy: null,
@@ -507,9 +554,12 @@ export function parseExtensionSequence(input) {
         case EXTENSION_OIDS.CRL_DISTRIBUTION_POINTS:
           extensions.crlDistributionPoints = parseCrlDistributionPoints(octet.value);
           break;
-        case EXTENSION_OIDS.CERTIFICATE_POLICIES:
-          extensions.certificatePolicies = parseCertificatePolicies(octet.value);
+        case EXTENSION_OIDS.CERTIFICATE_POLICIES: {
+          const parsedPolicies = parseCertificatePolicies(octet.value);
+          extensions.certificatePolicies = parsedPolicies.oids;
+          extensions.certificatePolicyInfo = parsedPolicies.info;
           break;
+        }
         case EXTENSION_OIDS.NAME_CONSTRAINTS:
           extensions.nameConstraints = parseNameConstraints(octet.value);
           break;
