@@ -260,8 +260,8 @@ Additional GitHub Actions hardening:
 ```text
 PKI.js + asn1js differential parser comparison  (gating)
 C2SP x509-limbo pinned corpus parser smoke       (informational while alpha)
-Playwright Chromium / Firefox / WebKit           (gating)
-axe serious/critical accessibility scan          (gating)
+Playwright Chromium / Firefox / WebKit           (restored gating; CI re-verification pending)
+axe serious/critical accessibility scan          (restored gating; CI re-verification pending)
 ```
 
 The external packages are test-only and installed in CI; they are not runtime dependencies of `public/`.
@@ -270,6 +270,10 @@ The x509-limbo corpus is pinned by commit SHA to keep results reproducible. It i
 
 ## 14. Release model
 
-`public/` is the complete deployable site. Pages deployment is separate from validation and depends on the core, standards-hardening and browser jobs.
+`public/` is the complete deployable site. Pages deployment depends on the core, standards-hardening and restored browser jobs. The browser job was previously skipped due to a server-root mismatch; see `docs/testing.md`. Owner T2 release approval and protected environment review remain to be enforced.
 
 `scripts/rc-smoke.sh` and `RELEASE_CHECKLIST.md` provide a repeatable pre-release path for local and manual checks that cannot be represented by unit tests alone.
+
+## SFW governance
+
+Policy: `AGENTS.md` + `docs/engineering/SFW_AI_ENGINEERING_STANDARD.md`. Threat model: `docs/threat-model.md`. Actual checks, legacy E2E exception history and deferred gates: `docs/testing.md`. Project profile B+D; cryptography/parser/deployment changes are T2.

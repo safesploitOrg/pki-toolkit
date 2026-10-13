@@ -102,3 +102,7 @@ Do not include production private keys, passwords or other secret key material i
 ## Test material
 
 The automated test PKI is generated locally by `scripts/generate-test-pki.sh`. Generated private keys, PKCS#12 containers and certificates under `tests/fixtures/` are intentionally Git-ignored and should not be committed. They are disposable test-only material and are regenerated in CI.
+
+## SFW T2 threat and release review
+
+See `docs/threat-model.md` for actors, assets, trust boundaries, abuse cases, verification limitations and unresolved hostile-input work budgets. See `docs/testing.md` for actual CI gate status. No passing AI-assisted test suite substitutes for recorded human release approval.

@@ -28,9 +28,10 @@ Current pinned x509-limbo commit for the alpha hardening job:
 
 ## 3. Browser / accessibility
 
-> Temporarily deferred for the v0.6 alpha standards checkpoint. The workflow job is retained but disabled; all items in this section become gating again before beta/RC.
+> Multi-engine browser/axe gate restored in v0.6.0-alpha.3. The first run exposed missing per-job fixtures and unlabelled upload controls; both are addressed in alpha.4, but all engines/axe must pass in GitHub Actions before the release gate is satisfied.
 
 
+- [ ] Browser fixture preflight runs in each isolated CI/Pages E2E job.
 - [ ] Chromium E2E passes.
 - [ ] Firefox E2E passes.
 - [ ] WebKit E2E passes.
@@ -107,3 +108,14 @@ Test with disposable/non-secret material from representative sources:
 A stable release should not be blocked by every obscure RFC 5280 feature, but it **should** require conservative behaviour: unsupported semantics must be clearly marked indeterminate rather than accepted as valid.
 
 Before `v1.0`, explicitly document any remaining non-gating limitations in the release notes.
+
+## 10. SFW T2 release requirements
+
+- [ ] Required browser and accessibility jobs are **executed**, not skipped.
+- [ ] ESLint/SAST/secret/dependency gates enforced and passing.
+- [ ] Parsing/KDF hostile-work budgets and negative tests implemented.
+- [ ] Protected deployment environment and required reviewer configured by the repository owner.
+- [ ] Record owner review of the T2 diff, test evidence, known risks, commit SHA and rollback plan.
+- [ ] Confirm deployment artifact corresponds to the validated commit; execute post-deployment smoke checks.
+
+Until these gates are satisfied, describe the package as **development alpha**, not an approved public release.

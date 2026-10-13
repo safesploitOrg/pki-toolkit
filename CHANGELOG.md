@@ -4,6 +4,38 @@ All notable changes to PKI Toolkit are documented here.
 
 The project is still pre-1.0; APIs and UI details may change while the parser and validation model are hardened.
 
+## [0.6.0-alpha.4] - 2026-10-14
+
+### Fixed — browser E2E and accessibility
+
+- Fixed GitHub Actions job isolation: both CI and Pages `browser-e2e` jobs now run `npm ci`, regenerate disposable certificate/key/CSR fixtures, and verify required files before launching Playwright. Fixtures from the separate core `test` job are not shared.
+- Named all three visually hidden certificate file-upload controls (Root, dynamically inserted Intermediate, Server), with accessible labels for their companion certificate PEM textareas and upload inputs removed from the keyboard tab order (visible file-picker buttons remain focusable).
+- Added targeted Playwright accessible-name checks and made axe failures print concise selector-focused summaries instead of full violation JSON dumps.
+- Added a deterministic browser fixture preflight (`npm run test:browser:preflight`, also enforced by `npm run test:browser`) and unit assertions that both workflows regenerate fixtures and upload inputs have labels.
+- Kept Chromium, Firefox, WebKit, mobile Chromium, axe and the Pages deployment dependency **required**. No test bypasses or threshold reductions.
+
+### Verification boundary
+
+- The 2026-10-13 Actions log proves the original server-root issue was resolved: 8/24 tests passed, while 12 were blocked by missing per-job fixtures and four axe tests identified unlabelled file inputs.
+- This checkpoint addresses those known root causes; a new remote Playwright/axe run is required before claiming all browsers green or approving a T2 release.
+
+## [0.6.0-alpha.3] - 2026-10-13
+
+### SFW adoption and browser-gate restoration
+
+- Corrected Playwright `baseURL`/`webServer` so both use the `public/` server root, matching the actual deployed site and resolving the root-directory-listing test setup mistake.
+- Added a browser regression asserting `/` serves the application document (`main`, navigation and title).
+- Added a real static HTTP server regression via `npm run test:server` (included in `npm run check`) and three unit tests covering Playwright root, required browser gates and Pages token privilege scope.
+- Restored multi-engine Playwright + axe as **required** jobs in CI and Pages, with Pages deployment dependent on the browser result. Fresh CI confirmation remains pending.
+- Made Pages workflow credentials least-privilege at job scope: only `deploy` receives `pages:write` and `id-token:write`.
+- Adopted SFW v1.1.0 through `AGENTS.md` and `docs/engineering/`, with an initial T2 threat model and honest quality-gate/bypass history.
+- Reconciled documentation with the current workflow. Other SFW controls (scanner gates, dependency locks, work budgets, T2 owner approval) remain explicitly outstanding.
+
+### Verification
+
+- Existing 57-test baseline, OpenSSL differential and parser fuzz passed before this change; new suite now has 60 tests.
+- Real HTTP root smoke passed; local Python Playwright Chromium navigation was blocked by the host policy (`ERR_BLOCKED_BY_ADMINISTRATOR`) and native Node Playwright/axe packages could not be installed (npm DNS). Remote Playwright/axe status is **NOT VERIFIED**; do **not** infer cross-browser pass from edited workflow YAML.
+
 ## [0.6.0-alpha.2] - 2026-10-04
 
 ### Fixed
