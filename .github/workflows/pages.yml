@@ -77,12 +77,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install package metadata
+        run: npm ci --ignore-scripts
+      # GitHub Actions jobs have independent filesystems. Fixtures generated in
+      # 'test' do not exist in this job and must be regenerated here.
+      - name: Regenerate disposable browser PKI fixtures
+        run: npm run fixtures
+      - name: Verify browser fixtures
+        run: npm run test:browser:preflight
       - name: Install pinned Playwright test runner
-        run: npm install --no-save @playwright/test@1.56.1 @axe-core/playwright@4.10.2
+        run: npm install --no-save --ignore-scripts @playwright/test@1.56.1 @axe-core/playwright@4.10.2
       - name: Install browser engines
         run: npx playwright install --with-deps chromium firefox webkit
-      - name: Browser E2E
-        run: npx playwright test
+      - name: Browser E2E and axe accessibility
+        run: npm run test:browser
 
   deploy:
     needs: [test, standards-hardening, browser-e2e]

@@ -56,6 +56,11 @@ test('basic accessibility and footer/repository affordances exist', async ({ pag
   await page.goto('/#certificate');
   await expect(page.locator('main')).toHaveCount(1);
   await expect(page.locator('nav[aria-label="Primary navigation"]')).toHaveCount(1);
+  // The upload inputs are visually hidden but must remain correctly named;
+  // their visible 'Choose file' buttons are the keyboard activation surface.
+  await expect(page.locator('input[data-file-input="root-input"]')).toHaveAccessibleName('Upload Root CA certificate file');
+  await expect(page.locator('input[data-file-input="intermediate-1"]')).toHaveAccessibleName('Upload Intermediate CA certificate file');
+  await expect(page.locator('input[data-file-input="server-input"]')).toHaveAccessibleName('Upload Server certificate file');
   await expect(page.locator('footer')).toContainText('PKI Toolkit');
   await expect(page.locator('.footer-repo')).toHaveAttribute('href', 'https://github.com/safesploitOrg/pki-toolkit');
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', './assets/images/favicon/certificate-96x96.png');
@@ -68,6 +73,7 @@ test('has no serious or critical axe violations on primary routes', async ({ pag
     await page.goto(`/#${route}`);
     const results = await new AxeBuilder({ page }).analyze();
     const blocking = results.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact));
-    expect(blocking, `${route} accessibility violations:\n${blocking.map((v) => `${v.id}: ${v.help}`).join('\n')}`).toEqual([]);
+    const details = blocking.map((v) => `${v.impact} ${v.id}: ${v.help} (${v.nodes.map((n) => n.target.join(' ')).join(', ')})`).join('\n');
+    expect(blocking.length, `${route} accessibility violations:\n${details}`).toBe(0);
   }
 });

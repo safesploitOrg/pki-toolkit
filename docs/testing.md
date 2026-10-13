@@ -18,7 +18,7 @@ npm run serve
 
 | Gate | Status | Evidence / limitations |
 | --- | --- | --- |
-| Core syntax/unit/OpenSSL/fuzz/CSP | **Required** | `test` job in `.github/workflows/ci.yml`; baseline 57/57 unit tests before edits; checkpoint 60/60 after adding three CI/browser-policy tests |
+| Core syntax/unit/OpenSSL/fuzz/CSP | **Required** | `test` job in `.github/workflows/ci.yml`; baseline 57/57 unit tests before edits; alpha.3 checkpoint 60/60; alpha.4 adds per-job fixture and accessible-input regression tests |
 | PKI.js + NIST PKITS | **Required** | `standards-hardening` job; last inspected prior release had 24 parser fixtures and 88/88 PKITS vectors |
 | x509-limbo parser smoke | **Informational** | Explicit `continue-on-error`; semantic validation not implemented |
 | Chromium/Firefox/WebKit/mobile + axe | **Required, restored in proposed workflows** | `browser-e2e` job, `deploy.needs` includes it; this change requires a fresh GitHub Actions execution to confirm |
@@ -42,3 +42,12 @@ npm run serve
 ## Outstanding environment limitations
 
 The authoring environment could not resolve `registry.npmjs.org` to install the Playwright/axe Node test packages. An attempt to navigate to local HTTP using installed Python Playwright + Chromium was blocked by the host policy (`ERR_BLOCKED_BY_ADMINISTRATOR`). The native Node Playwright/axe test matrix is therefore **NOT RUN locally**. The actual HTTP server regression test passes, but does **not** replace browser/E2E verification.
+
+## 2026-10-13 browser-gate failure triage / alpha.4 remediation
+
+The first restored remote Playwright job demonstrated the static server-root fix works: `GET /` and all ES modules returned 200, and 8/24 browser cases passed. The 16 remaining failures were fully explained by two reproducible categories:
+
+- **12 missing fixture failures** (3 certificate/key/CSR workflows × 4 browser projects): the `browser-e2e` job does not share the `tests/fixtures/` files generated in the separate `test` job. Fixed by generating and preflighting fixtures within each browser job.
+- **4 critical axe form-label failures** (certificate route × 4 browser projects): the programmatically invoked, visually hidden Root/Intermediate/Server file inputs lacked accessible names. Fixed by adding explicit accessible names and regression checks.
+
+The root issue was CI setup, not browser compatibility, and axe detected a genuine form accessibility bug. **All four engines/axe remain mandatory**; the next remote run must confirm the fixes. No bypass or owner waiver has been asserted. If new failures appear after fixture generation, triage them as additional issues, not as proof this remediation is complete.

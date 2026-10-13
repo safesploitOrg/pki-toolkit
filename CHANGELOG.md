@@ -4,6 +4,21 @@ All notable changes to PKI Toolkit are documented here.
 
 The project is still pre-1.0; APIs and UI details may change while the parser and validation model are hardened.
 
+## [0.6.0-alpha.4] - 2026-10-14
+
+### Fixed — browser E2E and accessibility
+
+- Fixed GitHub Actions job isolation: both CI and Pages `browser-e2e` jobs now run `npm ci`, regenerate disposable certificate/key/CSR fixtures, and verify required files before launching Playwright. Fixtures from the separate core `test` job are not shared.
+- Named all three visually hidden certificate file-upload controls (Root, dynamically inserted Intermediate, Server), with accessible labels for their companion certificate PEM textareas and upload inputs removed from the keyboard tab order (visible file-picker buttons remain focusable).
+- Added targeted Playwright accessible-name checks and made axe failures print concise selector-focused summaries instead of full violation JSON dumps.
+- Added a deterministic browser fixture preflight (`npm run test:browser:preflight`, also enforced by `npm run test:browser`) and unit assertions that both workflows regenerate fixtures and upload inputs have labels.
+- Kept Chromium, Firefox, WebKit, mobile Chromium, axe and the Pages deployment dependency **required**. No test bypasses or threshold reductions.
+
+### Verification boundary
+
+- The 2026-10-13 Actions log proves the original server-root issue was resolved: 8/24 tests passed, while 12 were blocked by missing per-job fixtures and four axe tests identified unlabelled file inputs.
+- This checkpoint addresses those known root causes; a new remote Playwright/axe run is required before claiming all browsers green or approving a T2 release.
+
 ## [0.6.0-alpha.3] - 2026-10-13
 
 ### SFW adoption and browser-gate restoration

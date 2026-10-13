@@ -28,9 +28,10 @@ Current pinned x509-limbo commit for the alpha hardening job:
 
 ## 3. Browser / accessibility
 
-> Multi-engine browser/axe gate restored in v0.6.0-alpha.3; it is release-blocking until confirmed PASS in GitHub Actions. Previous skipped runs are not evidence of compatibility.
+> Multi-engine browser/axe gate restored in v0.6.0-alpha.3. The first run exposed missing per-job fixtures and unlabelled upload controls; both are addressed in alpha.4, but all engines/axe must pass in GitHub Actions before the release gate is satisfied.
 
 
+- [ ] Browser fixture preflight runs in each isolated CI/Pages E2E job.
 - [ ] Chromium E2E passes.
 - [ ] Firefox E2E passes.
 - [ ] WebKit E2E passes.

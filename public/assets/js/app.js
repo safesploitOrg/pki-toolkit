@@ -85,8 +85,9 @@ function addIntermediate(text = '') {
       </div>
     </div>
     <p class="field-help">Add another Intermediate CA when the hierarchy has more than one issuing tier.</p>
+    <label class="visually-hidden" for="${id}">Intermediate CA certificate PEM</label>
     <textarea id="${id}" spellcheck="false" autocomplete="off" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
-    <input class="visually-hidden" type="file" data-file-input="${id}" accept=".pem,.crt,.cer,application/x-pem-file,application/pkix-cert">
+    <input class="visually-hidden" type="file" data-file-input="${id}" aria-label="Upload Intermediate CA certificate file" tabindex="-1" accept=".pem,.crt,.cer,application/x-pem-file,application/pkix-cert">
   `;
   $(`#intermediate-list`).append(card);
   $(`#${id}`).value = text;

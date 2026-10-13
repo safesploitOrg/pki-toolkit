@@ -2,7 +2,7 @@
 
 ## Current release line — v0.6 alpha
 
-`v0.6.0-alpha.3` begins SFW v1.1 adoption and restores the multi-engine browser/axe CI gate after correcting the Playwright document root. Remote verification of this change is pending; dependency/scanner gates and owner deployment approval remain future stages.
+`v0.6.0-alpha.4` addresses the first remote browser-gate regression: CI job isolation left disposable fixtures missing, and axe detected unlabelled upload inputs. The browser/axe CI gate remains mandatory; a fresh full remote pass is pending. Dependency/scanner gates and owner deployment approval remain future stages.
 
 ## v0.1 — Certificate analyser
 
@@ -68,6 +68,8 @@
 - [x] Add RFC 9618 linear policy-graph semantics and qualifier output.
 - [x] Add pinned NIST PKITS policy corpus runner.
 - [x] Restore browser/axe CI job and Pages dependency, correcting the Playwright web root.
+- [x] Regenerate disposable PKI fixtures in isolated browser jobs and preflight required files.
+- [x] Label all certificate upload controls (including dynamically added intermediate inputs).
 - [ ] Verify restored browser/axe matrix passes in remote CI; triage any remaining failures.
 
 

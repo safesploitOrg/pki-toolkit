@@ -74,8 +74,9 @@
               <button class="text-button" type="button" data-file-trigger="root-input">Choose file</button>
             </div>
             <p class="field-help">Paste the PEM trust anchor. Multiple Root CA certificates are accepted for alternative-path testing.</p>
+            <label class="visually-hidden" for="root-input">Root CA certificate PEM</label>
             <textarea id="root-input" name="root" spellcheck="false" autocomplete="off" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
-            <input class="visually-hidden" type="file" data-file-input="root-input" accept=".pem,.crt,.cer,application/x-pem-file,application/pkix-cert">
+            <input class="visually-hidden" type="file" data-file-input="root-input" aria-label="Upload Root CA certificate file" tabindex="-1" accept=".pem,.crt,.cer,application/x-pem-file,application/pkix-cert">
           </article>
 
           <div id="intermediate-list" class="intermediate-list" aria-live="polite"></div>
@@ -95,8 +96,9 @@
               <button class="text-button" type="button" data-file-trigger="server-input">Choose file</button>
             </div>
             <p class="field-help">The end-entity/leaf certificate presented by your TLS service.</p>
+            <label class="visually-hidden" for="server-input">Server certificate PEM</label>
             <textarea id="server-input" name="server" spellcheck="false" autocomplete="off" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
-            <input class="visually-hidden" type="file" data-file-input="server-input" accept=".pem,.crt,.cer,application/x-pem-file,application/pkix-cert">
+            <input class="visually-hidden" type="file" data-file-input="server-input" aria-label="Upload Server certificate file" tabindex="-1" accept=".pem,.crt,.cer,application/x-pem-file,application/pkix-cert">
           </article>
         </section>
 

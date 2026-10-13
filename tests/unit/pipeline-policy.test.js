@@ -34,3 +34,30 @@ test('only the Pages deployment job is granted OIDC/Pages write', async () => {
   assert.doesNotMatch(top, /pages:\s*write|id-token:\s*write/);
   assert.match(deploy, /permissions:\s*\n\s*contents:\s*read\s*\n\s*pages:\s*write\s*\n\s*id-token:\s*write/);
 });
+
+
+test('each isolated browser job regenerates the disposable PKI fixtures and runs preflight', async () => {
+  const pkg = JSON.parse(await content('package.json'));
+  assert.match(pkg.scripts['test:browser'], /test:browser:preflight/);
+  for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/pages.yml']) {
+    const yaml = await content(workflow);
+    const browser = yaml.split(/^  browser-e2e:\s*$/m)[1]?.split(/^  [a-z][\w-]*:\s*$/m)[0];
+    assert.ok(browser, `${workflow}: missing browser-e2e job`);
+    assert.match(browser, /npm ci --ignore-scripts/);
+    assert.match(browser, /npm run fixtures/);
+    assert.match(browser, /npm run test:browser:preflight/);
+    assert.match(browser, /npm run test:browser/);
+  }
+});
+
+test('static and generated certificate file controls have accessible names', async () => {
+  const html = await content('public/index.html');
+  const app = await content('public/assets/js/app.js');
+  for (const name of ['root-input', 'server-input']) {
+    const tag = html.match(new RegExp(`<input[^>]*data-file-input="${name}"[^>]*>`, 'g'))?.[0] || '';
+    assert.match(tag, /aria-label="Upload [^"]+ certificate file"/);
+    assert.match(tag, /tabindex="-1"/);
+  }
+  assert.match(app, /data-file-input="\$\{id\}" aria-label="Upload Intermediate CA certificate file"/);
+  assert.match(app, /<label class="visually-hidden" for="\$\{id\}">/);
+});

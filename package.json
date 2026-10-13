@@ -1,6 +1,6 @@
 {
   "name": "pki-toolkit",
-  "version": "0.6.0-alpha.3",
+  "version": "0.6.0-alpha.4",
   "private": true,
   "description": "Browser-only PKI toolkit for X.509 chain validation, private-key matching, CSR inspection, certificate containers and revocation evidence.",
   "type": "module",
@@ -16,9 +16,10 @@
     "test:standards": "npm run test:pkits",
     "test:fuzz": "node scripts/parser-fuzz.mjs",
     "test:limbo": "node scripts/x509-limbo-smoke.mjs",
-    "test:browser": "playwright test",
+    "test:browser": "npm run test:browser:preflight && playwright test",
     "test:rc": "bash scripts/rc-smoke.sh",
-    "test:server": "node scripts/http-root-smoke.mjs"
+    "test:server": "node scripts/http-root-smoke.mjs",
+    "test:browser:preflight": "node scripts/check-browser-fixtures.mjs"
   },
   "engines": {
     "node": ">=20"
