@@ -3,6 +3,14 @@ import fs from 'node:fs/promises';
 
 const fixture = (name) => fs.readFile(new URL(`../fixtures/${name}`, import.meta.url), 'utf8');
 
+test('serves the actual application at / rather than a directory listing', async ({ page }) => {
+  const response = await page.goto('/');
+  expect(response?.status()).toBe(200);
+  await expect(page.locator('main.app-shell')).toHaveCount(1);
+  await expect(page.locator('nav[aria-label="Primary navigation"]')).toHaveCount(1);
+  await expect(page).toHaveTitle('PKI Toolkit');
+});
+
 test('certificate analyser validates a two-intermediate chain', async ({ page }) => {
   const [root, int1, int2, leaf] = await Promise.all([
     fixture('valid-chain/root.pem'),

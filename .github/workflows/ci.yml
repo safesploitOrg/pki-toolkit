@@ -74,11 +74,8 @@ jobs:
           X509_LIMBO_JSON: /tmp/x509-limbo.json
         run: npm run test:limbo
 
-  # Temporarily disabled for the v0.6 standards-hardening line. The job is
-  # intentionally retained so the Playwright/static-server failure can be
-  # reproduced and fixed after policy/standards work is complete.
+  # Browser and axe are release gates for Profile B; do not bypass on failures.
   browser-e2e:
-    if: ${{ false }}
     runs-on: ubuntu-latest
     needs: test
     steps:

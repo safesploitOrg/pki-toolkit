@@ -8,7 +8,7 @@ Repository: https://github.com/safesploitOrg/pki-toolkit
 
 ## Current release line
 
-`v0.6.0-alpha.1` is the Stage 0/1 standards checkpoint: CI is stabilised and certificate-policy processing now follows RFC 5280 as updated by RFC 9618.
+`v0.6.0-alpha.3` is the SFW adoption/browser-gate restoration checkpoint. RFC 5280 policy processing follows RFC 9618; the full cross-browser verification must pass remotely before any T2 release.
 
 The project is still pre-1.0. A green result is intended to be useful and conservative, but the application does not claim universal RFC 5280/WebPKI equivalence yet. Unsupported critical semantics are reported as indeterminate rather than silently accepted.
 
@@ -125,7 +125,7 @@ GitHub Actions separates the checks into several layers:
 
 1. **Core:** fixture generation, syntax, unit tests, OpenSSL differential checks, deterministic parser fuzzing and static no-network/CSP assertions.
 2. **Standards hardening:** pinned PKI.js/asn1js differential parsing, a pinned NIST PKITS policy suite (sections 4.8–4.12), plus a pinned C2SP `x509-limbo` parser smoke.
-3. **Browser E2E:** the Playwright job is retained but temporarily disabled for the v0.6 alpha standards line; it will be debugged/re-enabled before beta/RC.
+3. **Browser E2E:** the Playwright server-root bug has been corrected, and the multi-engine + axe job is now a required CI/Pages gate. Fresh GitHub Actions verification is still required.
 4. **Accessibility:** axe remains part of the retained browser suite and resumes when browser E2E is re-enabled.
 
 External test-only packages are installed only inside CI. The deployed static application retains zero runtime package dependencies.
@@ -146,7 +146,7 @@ Private keys/passwords are not written to localStorage, sessionStorage, IndexedD
 
 ## Third-party material
 
-The certificate favicon supplied for the project is credited to Icons8 in the public footer. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) before changing/removing that attribution.
+The certificate favicon supplied for the project is credited to Icons8 in the existing public footer. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) before changing/removing that attribution.
 
 ## Project documentation
 
@@ -160,3 +160,7 @@ The certificate favicon supplied for the project is credited to Icons8 in the pu
 ### NIST PKITS policy corpus semantics
 
 `npm run test:pkits` validates policy-processing semantics against the pinned NIST PKITS 4.8-4.12 vectors. The adapter intentionally excludes unrelated extension-profile criticality checks because the reference PKITS policy harness invokes the policy algorithm directly. Normal browser/application validation keeps those RFC 5280 profile checks enabled.
+
+## SFW engineering policy
+
+The repository adopts [SFW AI Engineering Standard v1.1.0](docs/engineering/SFW_AI_ENGINEERING_STANDARD.md) via [AGENTS.md](AGENTS.md). See [T2 threat model](docs/threat-model.md) and [test/quality-gate status](docs/testing.md). Required security scans, dependency locking for external test tools, work budgets and manual release approval still need further implementation; do not interpret green core CI alone as an SFW-compliant release.

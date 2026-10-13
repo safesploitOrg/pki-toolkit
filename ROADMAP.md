@@ -2,7 +2,7 @@
 
 ## Current release line — v0.6 alpha
 
-`v0.6.0-alpha.1` completes Stage 0 (CI stabilisation) and Stage 1 (RFC 5280/RFC 9618 policy processing). Browser E2E is intentionally disabled until the later browser-debugging stage.
+`v0.6.0-alpha.3` begins SFW v1.1 adoption and restores the multi-engine browser/axe CI gate after correcting the Playwright document root. Remote verification of this change is pending; dependency/scanner gates and owner deployment approval remain future stages.
 
 ## v0.1 — Certificate analyser
 
@@ -67,7 +67,8 @@
 - [x] Isolate RFC policy processing in its own module.
 - [x] Add RFC 9618 linear policy-graph semantics and qualifier output.
 - [x] Add pinned NIST PKITS policy corpus runner.
-- [ ] Re-enable and debug browser E2E in the later browser stage.
+- [x] Restore browser/axe CI job and Pages dependency, correcting the Playwright web root.
+- [ ] Verify restored browser/axe matrix passes in remote CI; triage any remaining failures.
 
 
 ### RFC 5280 depth
@@ -134,3 +135,16 @@ Keep the normal workflow:
 4. Analyse path, hostname, lifetime and deployment order locally.
 
 A self-hosted companion service may be considered later, but it should remain optional and architecturally separate from the static public application.
+
+### SFW hardening roadmap (v0.6 alpha+)
+
+- [x] Adopt canonical SFW v1.1 and project-specific `AGENTS.md`.
+- [x] Document T2 assets/actors/trust boundaries and quality-gate history.
+- [x] Fix Playwright web root and restore mandatory CI job/deployment dependency.
+- [x] Restrict Pages write/OIDC token privileges to the deploy job.
+- [ ] Verify browser/axe across all CI engines on the proposed checkpoint.
+- [ ] Add locked dev dependencies, ESLint, JS SAST, secret scanning and dependency-audit gates.
+- [ ] Pin GitHub Actions to reviewed commit SHAs and implement dependency update workflow.
+- [ ] Enforce hostile-input byte/node/depth/count/KDF work limits.
+- [ ] Implement enforceable human T2 release approval in a protected Pages environment, plus branch protections.
+- [ ] Add semantic x509-limbo validation subset, platform trust profiles, CRL edge-case corpus and basic shift-right checks.
